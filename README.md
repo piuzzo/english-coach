@@ -4,7 +4,18 @@ Allenamento di inglese per uno studente di prima superiore: un **test iniziale**
 
 ## Come si usa
 
-1. Apri il file **`index.html`** con un doppio clic. Si apre nel browser: Chrome, Safari, Edge e Firefox vanno tutti bene, su Mac o Windows, anche su tablet.
+**Online, su qualsiasi dispositivo (consigliato):** apri **https://piuzzo.github.io/english-coach/**
+
+- **iPad / iPhone:** apri l'indirizzo in Safari → tasto **Condividi** → **"Aggiungi alla schermata Home"**. L'app compare come un'icona e si apre a schermo intero.
+- **Mac / PC:** aprila nel browser e aggiungila ai preferiti. Chrome ed Edge permettono anche di "installarla" dall'icona nella barra degli indirizzi.
+
+**Offline, senza internet:** apri il file **`index.html`** della cartella con un doppio clic (Mac e PC).
+
+> I progressi sono salvati separatamente per ogni indirizzo e browser: la versione online e il file locale non li condividono. Con la **sincronizzazione** attiva (vedi sotto) è tutto unito automaticamente. Senza sincronizzazione conviene usare sempre lo stesso indirizzo.
+
+Poi:
+
+1. Apri l'app (online o con un doppio clic su **`index.html`**). Si apre nel browser: Chrome, Safari, Edge e Firefox vanno tutti bene, su Mac o Windows, anche su tablet.
 2. Al primo avvio lo studente scrive il suo nome e fa il **test iniziale** (20–25 domande, 15–20 minuti).
 3. Da lì in poi basta premere **"Inizia l'allenamento"**, possibilmente una volta al giorno. Ogni sessione dura in genere 5–15 minuti.
 

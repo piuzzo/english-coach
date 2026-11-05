@@ -36,6 +36,12 @@ Web app offline per allenare l'inglese di uno studente italiano di prima superio
 - Ogni argomento deve avere esercizi di tutti e 3 i gradini e gruppi (`group`) con almeno 2 esercizi, così esiste sempre una variante.
 - Parametri pedagogici: `EC.learner.CFG` (intervalli, soglie di promozione) e `EC.session.CFG` (mix, probabilità generatori/AI).
 
+## Pubblicazione
+
+- Online su **GitHub Pages**: https://piuzzo.github.io/english-coach/ (repo pubblico `piuzzo/english-coach`, branch `main`, cartella radice). Ogni push su `main` pubblica in 1–2 minuti: **non pubblicare mai dati personali o segreti nel repo**.
+- `manifest.webmanifest` e `icons/` rendono l'app installabile su iPad/iPhone ("Aggiungi alla schermata Home"); il manifest viene collegato solo su http(s) (su file:// il browser lo rifiuterebbe).
+- L'app deve continuare a funzionare anche aperta in locale da file:// (uso offline su Mac/PC).
+
 ## Comandi
 
 ```bash

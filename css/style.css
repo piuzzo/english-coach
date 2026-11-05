@@ -437,3 +437,9 @@ select.text-input { padding: 12px 14px; font-size: 1rem; }
 .sync-chip.sync-error { border-color: var(--bad-border); background: var(--bad-soft); color: var(--bad); }
 .sync-chip.sync-offline { color: var(--text-3); }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em; padding: 1px 5px; border-radius: 6px; background: var(--surface-3); }
+
+/* touch (iPad/telefono): niente suggerimenti per la tastiera */
+@media (hover: none) and (pointer: coarse) {
+  .actions .hint { display: none; }
+  .option, .tile-word, .btn { -webkit-tap-highlight-color: transparent; }
+}
