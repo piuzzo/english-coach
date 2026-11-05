@@ -79,6 +79,24 @@ Il token resta salvato in ogni dispositivo: **non va reinserito**. Fanno eccezio
 **Senza sincronizzazione** i progressi restano nel browser del computer. Si possono comunque spostare a mano con **Area genitore → Esporta / Importa progressi**, che usa un file `.json`. Conviene esportare un backup ogni tanto: l'app lo ricorda da sola dopo 14 giorni.
 Attenzione: in una finestra di navigazione privata i progressi non vengono salvati.
 
+## Resoconto via email a fine sessione
+
+Ogni volta che una sessione viene completata puoi ricevere un'email. Contiene:
+- il risultato: esercizi svolti e % di risposte giuste al primo colpo;
+- gli argomenti migliorati e quelli da ripassare;
+- gli errori fatti, con la risposta giusta;
+- i progressi verso il livello successivo.
+
+**Come si attiva:**
+1. **Genitori → Resoconto via email**: attiva l'interruttore, scrivi l'indirizzo e premi **Salva**.
+2. Premi **Invia email di prova**. La prima volta arriva un'email di **attivazione** da FormSubmit: premi **Activate Form**. Va fatto una volta sola.
+
+**Come funziona:**
+- Le email partono dal servizio gratuito **FormSubmit** (formsubmit.co), senza bisogno di account. Il servizio riceve il nome e i risultati della sessione.
+- L'indirizzo è un'impostazione: **non è scritto nel codice pubblico** e si sincronizza tra i dispositivi collegati.
+- Se manca la connessione o il servizio non risponde, il resoconto resta **in coda** sul dispositivo e parte da solo più tardi, fino a 7 giorni. Non viene mai spedito due volte.
+- Funziona dalla versione online. Dal file `index.html` aperto in locale potrebbe non funzionare.
+
 ## AI facoltativa (Claude)
 
 Nell'**Area genitore** si può inserire una chiave API di Anthropic, che si crea su console.anthropic.com. Con la chiave l'app:

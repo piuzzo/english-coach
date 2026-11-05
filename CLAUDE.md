@@ -8,6 +8,7 @@ Web app offline per allenare l'inglese di uno studente italiano di prima superio
 - **Ordine degli script = ordine in `index.html`**. `tests/load.js` legge quella lista per caricare gli stessi file in Node: un nuovo file va aggiunto lì, nel punto giusto.
 - I file `js/ui.js` e `js/app.js` sono solo browser (DOM). Tutto il resto deve restare eseguibile in Node.
 - I progressi sono in `localStorage` (chiave `englishCoach.v1`). Lo schema è in `js/storage.js → defaultState()`. Se aggiungi campi, `migrate()` li completa per i dati vecchi: non rompere i backup esistenti.
+- L'indirizzo email del genitore non va mai scritto nel codice (repo pubblico): sta solo in `state.reports`.
 - La chiave API e il token GitHub non devono mai finire nei backup né nel Gist (`exportJson` e `EC.sync.publicCopy` tengono solo `aiModel` delle impostazioni). Le impostazioni sono sempre locali al dispositivo.
 - Sincronizzazione: `app.js` usa `adopt()` per sostituire il contenuto di `state` **mantenendo lo stesso oggetto** (la sessione in corso ne tiene un riferimento). Momenti di sync: avvio, prima di una sessione (max 5 s), 20 s dopo l'ultima risposta, fine sessione/test, pagina nascosta, ritorno online. `merge()` deve restare deterministico e idempotente (testato in `tests/run.js`, sezione 9, con un finto GitHub in memoria).
 
@@ -25,6 +26,7 @@ Web app offline per allenare l'inglese di uno studente italiano di prima superio
 | `js/session.js` | motore sessione: pool core/review/stretch (60/25/15), no argomento ripetuto di fila, varianti dopo errore, impalcatura (gradino −1, poi solo `mc`), snapshot per riprendere |
 | `js/ai.js` | Claude API facoltativa via `fetch` diretto dal browser (header `anthropic-dangerous-direct-browser-access`), output JSON strutturato, `sanitize()` valida ogni esercizio generato |
 | `js/sync.js` | sincronizzazione tra dispositivi via Gist segreto GitHub (`english-coach-progress.json`): `merge()` puro (unione di sessioni per `start`, argomenti/esercizi per `last`, livello = il più alto, streak ricalcolata, `resetAt` più recente vince), client REST GitHub, `syncNow()` = scarica → unisci → carica solo se cambiato |
+| `js/report.js` | resoconto email a fine sessione via FormSubmit (`POST https://formsubmit.co/ajax/<email>`, JSON, `_template: table`): impostazioni in `state.reports` (sincronizzate, vince `updatedAt` più recente), coda locale `state.settings.mailQueue` (mai sincronizzata né esportata), ritentativi fino a 7 giorni, risposta "needs Activation" = consegnato dopo la conferma |
 | `js/ui.js`, `js/app.js` | componenti grafici e schermate (home, test, sessione, riepilogo, progressi, area genitore, guida) |
 | `css/style.css` | design token su `:root`, tema scuro automatico, responsive |
 

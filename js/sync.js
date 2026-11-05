@@ -66,6 +66,10 @@ EC.sync = (function () {
     out.lastBackupAt = Math.max(L.lastBackupAt || 0, R.lastBackupAt || 0) || null;
     out.resetAt = L.resetAt || null;
 
+    // impostazioni del resoconto email: vince la modifica più recente
+    var ra = L.reports || { updatedAt: 0 }, rb = R.reports || { updatedAt: 0 };
+    out.reports = U.clone((rb.updatedAt || 0) > (ra.updatedAt || 0) ? rb : ra);
+
     // livello: si sale soltanto (un livello raggiunto su un dispositivo vale per tutti)
     out.level = lvlIdx(R.level) > lvlIdx(L.level) ? R.level : L.level;
 

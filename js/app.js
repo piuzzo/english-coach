@@ -42,6 +42,10 @@
     if (!opts.timeout) return p;
     return Promise.race([p, new Promise(function (r) { setTimeout(function () { r(false); }, opts.timeout); })]);
   }
+  function flushReports() {
+    if (!EC.report.queue(state).length) return Promise.resolve();
+    return EC.report.flush(state).then(function () { save(); }, function () { save(); });
+  }
   var syncTimer = null;
   function syncSoon(ms) {
     if (!EC.sync.enabled(state)) return;
@@ -627,7 +631,11 @@
   function finishSession() {
     var s = ctx.session;
     var sum = s.finish();
+    if (EC.report.enabled(state)) {
+      EC.report.enqueue(state, sum, { device: deviceInfo().label, levelStatus: L.levelUpStatus(state) });
+    }
     save();
+    flushReports();
     clearTimeout(syncTimer);
     syncNow();
     ctx.session = null;
@@ -700,7 +708,7 @@
       (syncOn ? '' : '<button class="btn secondary" data-nav="parent">Attiva la sincronizzazione</button>') + '</div></div>';
 
     // indice
-    var idx = [['studente', '🎓 Per lo studente'], ['installare', '📲 Installare l\'app'], ['sync', '☁️ Sincronizzazione'], ['backup', '💾 Backup'], ['ai', '✨ AI'], ['faq', '❓ Domande frequenti']];
+    var idx = [['studente', '🎓 Per lo studente'], ['installare', '📲 Installare l\'app'], ['sync', '☁️ Sincronizzazione'], ['email', '📧 Email'], ['backup', '💾 Backup'], ['ai', '✨ AI'], ['faq', '❓ Domande frequenti']];
     h += '<div class="chips guide-index" style="margin-top:14px">' + idx.map(function (x) { return '<button class="chip primary" data-goto="g-' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>';
 
     h += sec('studente', '🎓 Come funziona (per lo studente)',
@@ -753,6 +761,13 @@
       '<h3>3. Poi fa tutto da sola</h3>' +
       '<p>Sincronizza all\'apertura, prima e dopo ogni sessione, durante gli esercizi, quando chiudi la pagina e quando torna internet. L\'icona in alto mostra lo stato: <span class="sync-chip sync-ok" style="cursor:default">☁️✓</span> sincronizzato, <span class="sync-chip sync-offline" style="cursor:default">☁️ offline</span> senza rete (sincronizzerà appena torna), <span class="sync-chip sync-error" style="cursor:default">☁️⚠️</span> problema (tocca l\'icona per i dettagli).</p>');
 
+    h += sec('email', '📧 Resoconto via email',
+      '<p>Puoi ricevere un\'email ogni volta che una sessione viene completata, con risultato, errori e progressi.</p>' + steps([
+        'In <b>Genitori → Resoconto via email</b> attiva "Invia il resoconto", scrivi l\'indirizzo e premi <b>Salva</b>.',
+        'Premi <b>Invia email di prova</b>. La prima volta arriva un\'email di <b>attivazione</b> da FormSubmit: aprila e premi <b>Activate Form</b> (una volta sola).',
+        'Fatto: da ora il resoconto parte da solo a fine sessione, da qualunque dispositivo collegato. Se non c\'è connessione resta in attesa e parte appena possibile.'
+      ]) + '<p class="small muted">Se le email non arrivano, controlla lo spam e segna il mittente come "non spam". Funziona dalla versione online dell\'app.</p>');
+
     h += sec('backup', '💾 Backup manuale',
       '<p>Con la sincronizzazione attiva i progressi sono già al sicuro su GitHub. Senza sincronizzazione, ogni tanto salva un backup:</p>' + steps([
         '<b>Genitori → Esporta progressi</b>: scarica un file <code>.json</code> (cartella Download).',
@@ -773,6 +788,7 @@
       faq('Chi può vedere i progressi?', 'Sono in un Gist <b>segreto</b> del tuo account GitHub: non è elencato pubblicamente, ma chi conosce il suo link (o il link di collegamento) può leggerlo. Contiene solo il nome e i risultati degli esercizi. Il link di collegamento mandalo solo ai tuoi dispositivi.') +
       faq('Perché una sessione dura più di 10 esercizi?', 'Perché finisce con 10 risposte <b>corrette</b>: ogni errore aggiunge un esercizio (con spiegazione e variante). È voluto: si impara proprio lì.') +
       faq('Il livello sembra troppo facile o troppo difficile.', 'Rifai il <b>test di livello</b> (Home → Rifai il test): non cancella i progressi, può alzare il livello e segnala gli argomenti da ripassare. Comunque il sistema si adatta da solo sessione dopo sessione.') +
+      faq('Non ricevo le email dei resoconti.', 'Controlla lo spam e che l\'attivazione FormSubmit sia stata confermata (Genitori → Invia email di prova). Se il servizio è momentaneamente irraggiungibile i resoconti restano in attesa e partono da soli più tardi (fino a 7 giorni).') +
       faq('Come si ricomincia da zero?', '<b>Genitori → Azzera tutti i progressi</b>. Con la sincronizzazione attiva l\'azzeramento vale per tutti i dispositivi.')
     );
 
@@ -898,6 +914,7 @@
     }
 
     h += syncCardHtml();
+    h += reportCardHtml();
 
     // backup
     h += '<div class="card stack" style="margin-top:16px"><h2>💾 Backup manuale</h2>' +
@@ -940,6 +957,26 @@
       });
     }
     if (a === 'sync-link') return showLinkModal();
+    if (a === 'mail-save' || a === 'mail-test') {
+      var em = UI.$('#mail-to').value.trim();
+      var on = UI.$('#mail-on').checked;
+      if (on && !EC.report.validEmail(em)) { UI.toast('Scrivi un indirizzo email valido.'); return; }
+      EC.report.setConfig(state, on, em);
+      save();
+      syncSoon(1000);
+      if (a === 'mail-save') { UI.toast(on ? 'Resoconto via email attivato ✓' : 'Impostazioni salvate'); return parent(); }
+      var stEl = UI.$('#mail-status');
+      stEl.innerHTML = '<span class="spinner"></span> Invio…';
+      return EC.report.sendTest(state).then(function (r) {
+        save();
+        stEl.innerHTML = r.needsActivation
+          ? '<span style="color:var(--warn);font-weight:700">📩 Controlla la casella: FormSubmit ti ha mandato un\'email di attivazione. Clicca "Activate Form" (una volta sola).</span>'
+          : '<span style="color:var(--ok);font-weight:700">✓ Email di prova inviata. Se non la vedi, guarda nello spam.</span>';
+      }, function (e) {
+        save();
+        stEl.innerHTML = '<span style="color:var(--bad);font-weight:700">✗ ' + esc(e.message) + '</span>';
+      });
+    }
     if (a === 'sync-now') {
       return EC.sync.syncNow(state).then(function (res) { adopt(res.state); L._resetCache(); UI.toast('Progressi sincronizzati ✓'); parent(); },
         function (e) { UI.toast(e.message, 4000); parent(); });
@@ -1129,6 +1166,27 @@
     return h;
   }
 
+  function reportCardHtml() {
+    var r = state.reports || {};
+    var inf = state.settings.mailInfo || {};
+    var q = EC.report.queue(state).length;
+    var h = '<div class="card stack" style="margin-top:16px"><h2>📧 Resoconto via email</h2>' +
+      '<p class="muted">Ogni volta che ' + esc(state.profile.name || 'lo studente') + ' completa una sessione ricevi un\'email con risultato, argomenti migliorati, errori fatti e progressi verso il livello successivo.</p>' +
+      '<label class="switch"><input type="checkbox" id="mail-on"' + (r.enabled ? ' checked' : '') + '> Invia il resoconto</label>' +
+      '<div class="field"><label for="mail-to">Indirizzo email</label><input class="text-input" id="mail-to" type="email" autocomplete="email" placeholder="nome@esempio.it" value="' + esc(r.email || '') + '"></div>' +
+      '<div class="row"><button class="btn" data-p="mail-save">Salva</button><button class="btn secondary" data-p="mail-test">Invia email di prova</button><span id="mail-status" class="small muted"></span></div>';
+    if (r.enabled) {
+      h += '<p class="small muted">' +
+        (inf.lastOkAt ? 'Ultimo invio riuscito: ' + new Date(inf.lastOkAt).toLocaleString('it-IT', { dateStyle: 'medium', timeStyle: 'short' }) + '. ' : '') +
+        (q ? '<b>' + q + ' resoconto/i in attesa</b> di invio (riprovo da solo). ' : '') +
+        (inf.lastError ? '<span style="color:var(--bad)">Ultimo errore: ' + esc(inf.lastError) + '</span>' : '') + '</p>';
+      if (inf.needsActivation) h += '<div class="banner">📩 <div>Al primo invio FormSubmit manda all\'indirizzo un\'email <b>"Activate Form"</b>: aprila e conferma (una volta sola). I resoconti già inviati arriveranno dopo la conferma. Controlla anche lo spam.</div></div>';
+    }
+    if (location.protocol === 'file:') h += '<p class="small" style="color:var(--warn)">⚠️ Stai usando l\'app aperta come file: le email potrebbero non partire. Funzionano sicuramente dalla versione online.</p>';
+    h += '<p class="small muted">Le email sono spedite dal servizio gratuito FormSubmit (formsubmit.co), che riceve nome e risultati della sessione. L\'indirizzo si sincronizza tra i dispositivi collegati e non viene pubblicato.</p></div>';
+    return h;
+  }
+
   function activateSync(token) {
     var el = UI.$('#sync-status');
     if (el) el.innerHTML = '<span class="spinner"></span> Collegamento…';
@@ -1161,5 +1219,9 @@
     var t = EC.sync.parseLink(location.hash);
     if (t) handleConnectLink(t);
   });
-  window.addEventListener('online', function () { if (EC.sync.enabled(state)) syncNow().then(function (c) { if (c) rerenderIfIdle(); }); });
+  window.addEventListener('online', function () {
+    flushReports();
+    if (EC.sync.enabled(state)) syncNow().then(function (c) { if (c) rerenderIfIdle(); });
+  });
+  setTimeout(flushReports, 1500);
 })();

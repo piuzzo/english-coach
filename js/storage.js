@@ -41,8 +41,11 @@ EC.storage = (function () {
       profile: { name: '' },
       settings: {
         apiKey: '', aiEnabled: false, aiModel: 'claude-opus-5-5',
-        sync: { enabled: false, token: '', gistId: '', lastSyncAt: null } // sincronizzazione via GitHub Gist
+        sync: { enabled: false, token: '', gistId: '', lastSyncAt: null }, // sincronizzazione via GitHub Gist
+        mailQueue: [], // resoconti email in attesa di invio (solo su questo dispositivo)
+        mailInfo: { lastOkAt: null, lastError: '', needsActivation: false }
       },
+      reports: { enabled: false, email: '', updatedAt: 0 }, // resoconto via email (sincronizzato)
       level: null, // livello di lavoro (null = test iniziale non ancora fatto)
       levelHistory: [], // { level, date, reason }
       placements: [], // risultati dei test iniziali
@@ -63,6 +66,9 @@ EC.storage = (function () {
     });
     st.settings = Object.assign({}, d.settings, st.settings || {});
     st.settings.sync = Object.assign({}, d.settings.sync, st.settings.sync || {});
+    st.settings.mailInfo = Object.assign({}, d.settings.mailInfo, st.settings.mailInfo || {});
+    if (!Array.isArray(st.settings.mailQueue)) st.settings.mailQueue = [];
+    st.reports = Object.assign({}, d.reports, st.reports || {});
     st.profile = Object.assign({}, d.profile, st.profile || {});
     st.streak = Object.assign({}, d.streak, st.streak || {});
     st.schema = SCHEMA;

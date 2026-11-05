@@ -471,6 +471,67 @@ section('Sincronizzazione tra dispositivi (GitHub Gist simulato)');
   const q = globalThis.qrcode(0, 'L'); q.addData(link); q.make();
   ok(q.getModuleCount() >= 21 && /<svg/.test(q.createSvgTag({ cellSize: 4, margin: 4, scalable: true })), 'il codice QR non viene generato');
 
+  // 11. resoconto via email (FormSubmit simulato)
+  {
+    const R = EC.report;
+    const st = EC.storage.defaultState();
+    st.profile.name = 'Marco'; st.level = 'A2';
+    const sum = sessOn(st, 77).summary;
+    ok(!R.enqueue(st, sum), 'senza impostazioni non si deve accodare nulla');
+    ok(!R.validEmail('ciao') && R.validEmail('pio@example.com'), 'validazione indirizzo email');
+    R.setConfig(st, true, 'genitore@example.com');
+    ok(R.enqueue(st, sum, { device: 'Mac', levelStatus: EC.learner.levelUpStatus(st) }), 'il resoconto dovrebbe entrare in coda');
+    ok(!R.enqueue(st, sum), 'lo stesso resoconto non deve essere accodato due volte');
+    const f = R.queue(st)[0].fields;
+    ok(/Marco/.test(f._subject) && f._template === 'table' && f['Studente'] === 'Marco' && /10 risposte corrette/.test(f['Risultato']), 'contenuto dell\'email incompleto');
+    ok(Object.keys(f).filter((k) => /^Errore \d+$/.test(k)).length === Math.min(10, sum.errors.length), 'gli errori della sessione devono comparire nell\'email');
+
+    const sent = [];
+    let mode = 'down';
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (url, opts) => {
+      if (!String(url).startsWith('https://formsubmit.co/ajax/')) return realFetch(url, opts);
+      if (mode === 'offline') throw new TypeError('Failed to fetch');
+      if (mode === 'down') return { ok: false, status: 522, json: async () => { throw new Error('html'); } };
+      if (mode === 'activate') return { ok: true, status: 200, json: async () => ({ success: 'false', message: 'This form needs Activation. We\'ve sent you an email containing an \'Activate Form\' button.' }) };
+      if (mode === 'reject') return { ok: false, status: 400, json: async () => ({ success: 'false', message: 'Bad request' }) };
+      sent.push({ url, body: JSON.parse(opts.body) });
+      return { ok: true, status: 200, json: async () => ({ success: 'true', message: 'The form was submitted successfully.' }) };
+    };
+    let r1 = await R.flush(st);
+    ok(r1.sent === 0 && r1.pending === 1 && R.info(st).lastError, 'con il servizio irraggiungibile il resoconto deve restare in coda');
+    mode = 'offline';
+    r1 = await R.flush(st);
+    ok(r1.pending === 1, 'offline: il resoconto resta in coda');
+    mode = 'activate';
+    r1 = await R.flush(st);
+    ok(r1.sent === 1 && r1.pending === 0 && R.info(st).needsActivation, 'la richiesta di attivazione conta come inviato (FormSubmit consegna dopo la conferma)');
+    mode = 'ok';
+    const sum2 = sessOn(st, 78).summary;
+    R.enqueue(st, sum2);
+    r1 = await R.flush(st);
+    ok(r1.sent === 1 && sent.length === 1 && sent[0].url.endsWith(encodeURIComponent('genitore@example.com')), 'invio non riuscito o indirizzo sbagliato');
+    mode = 'reject';
+    R.enqueue(st, sessOn(st, 79).summary);
+    for (let k = 0; k < 4; k++) await R.flush(st);
+    ok(R.queue(st).length === 0, 'un resoconto rifiutato più volte va scartato');
+    // vecchi di oltre 7 giorni: scartati
+    mode = 'down';
+    R.enqueue(st, sessOn(st, 80).summary);
+    env.advanceDays(8);
+    await R.flush(st);
+    ok(R.queue(st).length === 0, 'i resoconti più vecchi di 7 giorni vanno scartati');
+    // impostazioni sincronizzate, coda no
+    const other = EC.storage.defaultState();
+    const merged = S.merge(other, st);
+    ok(merged.reports.enabled && merged.reports.email === 'genitore@example.com', 'le impostazioni email devono sincronizzarsi');
+    ok(merged.settings.mailQueue.length === 0 && !S.publicCopy(st).settings.mailQueue, 'la coda email non deve uscire dal dispositivo');
+    const older = EC.util.clone(st); older.reports = { enabled: false, email: '', updatedAt: 1 };
+    ok(S.merge(older, st).reports.enabled === true, 'vince la modifica più recente delle impostazioni email');
+    ok(!EC.storage.exportJson(st).includes('mailQueue'), 'la coda email non deve finire nel backup');
+    globalThis.fetch = realFetch;
+  }
+
   console.log(`  3 dispositivi simulati, ${Object.keys(gists).length} Gist, ${calls} chiamate API simulate`);
   console.log(`\n${failures ? '✗' : '✓'} ${passes} controlli superati, ${failures} falliti`);
   process.exit(failures ? 1 : 0);
