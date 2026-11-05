@@ -4,6 +4,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>English Coach</title>
+  <meta name="description" content="Allenamento di inglese per la prima superiore">
+  <meta name="theme-color" content="#5b4fe9">
+  <!-- iPad/iPhone: "Aggiungi alla schermata Home" la apre come un'app -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="English Coach">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <script>
+    // il manifest serve solo quando l'app è online (su file:// il browser lo rifiuterebbe)
+    if (/^https?:$/.test(location.protocol)) {
+      var m = document.createElement('link'); m.rel = 'manifest'; m.href = 'manifest.webmanifest';
+      document.head.appendChild(m);
+    }
+  </script>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
