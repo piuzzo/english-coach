@@ -4,6 +4,8 @@ Allenamento di inglese per uno studente di prima superiore: un **test iniziale**
 
 ## Come si usa
 
+> Tutte le istruzioni di questa pagina sono anche **dentro l'app**, nella pagina **📖 Guida** del menu in alto. La Guida riconosce il dispositivo in uso ed evidenzia le istruzioni giuste.
+
 **Online, su qualsiasi dispositivo (consigliato):** apri **https://piuzzo.github.io/english-coach/**
 
 - **iPad / iPhone:** apri l'indirizzo in Safari → tasto **Condividi** → **"Aggiungi alla schermata Home"**. L'app compare come un'icona e si apre a schermo intero.

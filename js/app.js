@@ -72,7 +72,7 @@
   function updateTopbar() {
     var el = document.getElementById('topbar-level');
     if (!el) return;
-    var nav = [['home', 'Home'], ['progress', 'Progressi'], ['parent', 'Genitori']];
+    var nav = [['home', 'Home'], ['progress', 'Progressi'], ['parent', 'Genitori'], ['guide', 'Guida']];
     var sy = '';
     if (EC.sync.enabled(state)) {
       var st = EC.sync.status.state;
@@ -90,6 +90,7 @@
     if (screen === 'home') return home();
     if (screen === 'progress') return progress();
     if (screen === 'parent') return parent();
+    if (screen === 'guide') return guide();
   }
 
   document.addEventListener('click', function (e) {
@@ -161,6 +162,7 @@
     h += '<button class="card tile" data-action="placement-intro"><span class="tile-icon">🎯</span><h3>' + (lastP ? 'Rifai il test di livello' : 'Test di livello') + '</h3>' +
       '<p class="muted small">' + (lastP ? 'Ultimo test: ' + UI.fmtDay(lastP.date) + '. Utile una volta al mese.' : 'Circa 20–25 domande, senza aiuti.') + '</p></button>';
     h += '<button class="card tile" data-nav="parent"><span class="tile-icon">👨‍👩‍👦</span><h3>Area genitore</h3><p class="muted small">Statistiche, errori frequenti, backup, AI facoltativa.</p></button>';
+    h += '<button class="card tile" data-nav="guide"><span class="tile-icon">📖</span><h3>Guida</h3><p class="muted small">Come funziona, come installarla sul tablet, sincronizzazione.</p></button>';
     h += '</div>';
     render(h, 'home');
     bindActions();
@@ -174,6 +176,7 @@
       '<input id="name" class="text-input" autocomplete="given-name" maxlength="30" placeholder="Il tuo nome"></div>' +
       '<button class="btn lg block" id="go">Iniziamo →</button>' +
       '<button class="btn ghost block" id="link-device">☁️ Hai già usato English Coach su un altro dispositivo? Collegalo</button>' +
+      '<button class="btn ghost block" data-nav="guide">📖 Leggi la guida</button>' +
       '<p class="tiny muted">Oppure apri qui il <b>link di collegamento</b> (o inquadra il QR) creato dall\'Area genitore dell\'altro dispositivo.</p></div>';
     render(h, 'home');
     UI.$('#link-device').addEventListener('click', linkDeviceModal);
@@ -669,6 +672,120 @@
   }
   function stat(v, l) { return '<div class="stat"><div class="v">' + v + '</div><div class="l">' + esc(l) + '</div></div>'; }
 
+
+  /* ================= GUIDA ================= */
+  function deviceInfo() {
+    var ua = navigator.userAgent || '';
+    var kind = isIOS() ? 'ios' : /Android/i.test(ua) ? 'android' : /Windows/i.test(ua) ? 'windows' : /Macintosh|Mac OS X/i.test(ua) ? 'mac' : 'altro';
+    var label = { ios: /iPhone/.test(ua) ? 'iPhone' : 'iPad', android: 'tablet/telefono Android', windows: 'PC Windows', mac: 'Mac', altro: 'computer' }[kind];
+    var mode = isStandalone() ? 'app dalla schermata Home' : location.protocol === 'file:' ? 'file locale (index.html)' : 'sito nel browser';
+    return { kind: kind, label: label, mode: mode };
+  }
+
+  function guide() {
+    var d = deviceInfo();
+    var syncOn = EC.sync.enabled(state);
+    var here = function (k) { return d.kind === k ? ' <span class="chip ok">← questo dispositivo</span>' : ''; };
+    var url = PUBLIC_URL;
+    var sec = function (id, title, body) { return '<section class="card guide-section stack" id="g-' + id + '"><h2>' + title + '</h2>' + body + '</section>'; };
+    var steps = function (arr) { return '<ol class="steps">' + arr.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ol>'; };
+    var faq = function (q, a) { return '<details class="faq"><summary>' + q + '</summary><div>' + a + '</div></details>'; };
+
+    var h = '<h1>📖 Guida</h1><p class="muted" style="margin-top:6px">Tutto quello che serve per usare English Coach, passo per passo.</p>';
+
+    // stato di questo dispositivo
+    h += '<div class="card soft" style="margin-top:16px"><div class="row-between"><div><h3>Questo dispositivo</h3>' +
+      '<p class="small muted" style="margin-top:4px">' + esc(d.label) + ' · ' + esc(d.mode) + ' · sincronizzazione ' +
+      (syncOn ? '<b style="color:var(--ok)">attiva ☁️✓</b>' : '<b>non attiva</b>') + '</p></div>' +
+      (syncOn ? '' : '<button class="btn secondary" data-nav="parent">Attiva la sincronizzazione</button>') + '</div></div>';
+
+    // indice
+    var idx = [['studente', '🎓 Per lo studente'], ['installare', '📲 Installare l\'app'], ['sync', '☁️ Sincronizzazione'], ['backup', '💾 Backup'], ['ai', '✨ AI'], ['faq', '❓ Domande frequenti']];
+    h += '<div class="chips guide-index" style="margin-top:14px">' + idx.map(function (x) { return '<button class="chip primary" data-goto="g-' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>';
+
+    h += sec('studente', '🎓 Come funziona (per lo studente)',
+      steps([
+        '<b>Primo avvio:</b> scrivi il tuo nome e fai il <b>test iniziale</b> (20–25 domande, 15–20 minuti). Durante il test non vedi le correzioni; se non sai una risposta premi <b>"Non lo so"</b> invece di tirare a indovinare.',
+        '<b>Ogni giorno:</b> premi <b>"Inizia l\'allenamento"</b>. La sessione finisce quando arrivi a <b>10 risposte corrette</b> (l\'anello verde in alto si riempie).',
+        '<b>Se sbagli:</b> leggi il "Perché", riscrivi la risposta giusta e vai avanti. Poco dopo arriva un esercizio simile sulla stessa regola: è il momento di dimostrare che l\'hai capita.',
+        '<b>La difficoltà sale da sola:</b> ogni argomento ha 3 gradini (scegliere → completare → scrivere da solo) e il livello passa da A1 ad A2, B1 e B1+ quando sei pronto. Lo vedi in <b>Progressi</b>.',
+        '<b>Puoi fermarti quando vuoi</b> con "Esci": la sessione resta salvata e riparte da dove eri.'
+      ]) +
+      '<div class="banner info">💡 <div><b>Il trucco:</b> una sessione al giorno funziona molto meglio di tre sessioni in un giorno solo. Gli argomenti tornano a distanza di giorni apposta: è così che si fissano nella memoria.</div></div>' +
+      '<p class="small muted">Sul computer puoi usare la tastiera: <kbd>1</kbd>–<kbd>4</kbd> per scegliere una risposta, <kbd>Invio</kbd> per controllare e andare avanti.</p>');
+
+    h += sec('installare', '📲 Installare l\'app',
+      '<p>Indirizzo dell\'app: <a href="' + url + '" target="_blank" rel="noopener"><b>' + esc(url.replace('https://', '')) + '</b></a></p>' +
+      '<h3>iPad / iPhone' + here('ios') + '</h3>' + steps([
+        'Apri l\'indirizzo in <b>Safari</b>.',
+        'Tocca <b>Condividi</b> (il quadrato con la freccia in su) → <b>Aggiungi alla schermata Home</b> → <b>Aggiungi</b>.',
+        'Da ora apri English Coach dall\'<b>icona EC</b>: si apre a schermo intero, come un\'app.'
+      ]) +
+      '<p class="small muted">Attenzione: l\'app sulla schermata Home ha una memoria separata da Safari. Se usi la sincronizzazione, il modo più semplice è collegare l\'iPad con il <b>codice QR</b> (vedi sotto): pensa a tutto lui, icona compresa.</p>' +
+      '<h3>Tablet o telefono Android' + here('android') + '</h3>' + steps([
+        'Apri l\'indirizzo in <b>Chrome</b>.',
+        'Menu <b>⋮</b> → <b>Installa app</b> (oppure <b>Aggiungi a schermata Home</b>).'
+      ]) +
+      '<h3>Mac o PC Windows' + here('mac') + here('windows') + '</h3>' + steps([
+        'Apri l\'indirizzo nel browser e aggiungilo ai <b>preferiti</b>.',
+        'Con Chrome o Edge puoi anche "installarla": icona <b>Installa</b> nella barra degli indirizzi.'
+      ]) +
+      '<h3>Senza internet (solo Mac/PC)</h3>' + steps([
+        'Su <a href="https://github.com/piuzzo/english-coach" target="_blank" rel="noopener">GitHub</a> premi <b>Code → Download ZIP</b> ed estrai la cartella.',
+        'Apri <b>index.html</b> con un doppio clic. I progressi di questa versione sono separati da quelli online, a meno che non attivi la sincronizzazione.'
+      ]));
+
+    h += sec('sync', '☁️ Sincronizzazione tra dispositivi',
+      '<p>Con la sincronizzazione i progressi sono gli stessi su Mac, PC e tablet, in automatico. Si configura <b>una volta sola</b>.</p>' +
+      '<h3>1. Sul primo dispositivo (una volta)</h3>' + steps([
+        'Su GitHub apri <a href="' + TOKEN_URL + '" target="_blank" rel="noopener"><b>Settings → Developer settings → Fine-grained tokens → Generate new token</b></a>.',
+        'Nome: <b>English Coach</b>. Scadenza: 1 anno (o "No expiration").',
+        'In <b>Permissions → Account permissions</b> imposta <b>Gists</b> su <b>Read and write</b>. Nient\'altro: così il token non può toccare i tuoi repository.',
+        'Premi <b>Generate token</b> e copia il codice (inizia con <code>github_pat_</code>).',
+        'In English Coach vai in <b>Genitori → Sincronizzazione tra dispositivi</b>, incolla il token e premi <b>Attiva sincronizzazione</b>.'
+      ]) +
+      '<h3>2. Sugli altri dispositivi (senza copiare il token)</h3>' + steps([
+        'Sul dispositivo già collegato: <b>Genitori → 🔗 Collega un altro dispositivo</b>. Compare un codice QR.',
+        '<b>iPad/iPhone:</b> inquadra il QR con la <b>Fotocamera</b> e tocca il link → in Safari premi <b>Collega</b> → <b>Condividi → Aggiungi alla schermata Home</b>. La prima volta che apri l\'icona premi ancora <b>Collega</b>, poi mai più.',
+        '<b>Mac/PC:</b> premi <b>Copia</b> o <b>Condividi</b> (AirDrop, Messaggi, email a te stesso), apri il link nel browser di quel computer e premi <b>Collega</b>.'
+      ]) +
+      '<p class="small muted">In alternativa, su un dispositivo nuovo puoi incollare il token dalla prima schermata: "Hai già usato English Coach su un altro dispositivo? Collegalo".</p>' +
+      '<h3>3. Poi fa tutto da sola</h3>' +
+      '<p>Sincronizza all\'apertura, prima e dopo ogni sessione, durante gli esercizi, quando chiudi la pagina e quando torna internet. L\'icona in alto mostra lo stato: <span class="sync-chip sync-ok" style="cursor:default">☁️✓</span> sincronizzato, <span class="sync-chip sync-offline" style="cursor:default">☁️ offline</span> senza rete (sincronizzerà appena torna), <span class="sync-chip sync-error" style="cursor:default">☁️⚠️</span> problema (tocca l\'icona per i dettagli).</p>');
+
+    h += sec('backup', '💾 Backup manuale',
+      '<p>Con la sincronizzazione attiva i progressi sono già al sicuro su GitHub. Senza sincronizzazione, ogni tanto salva un backup:</p>' + steps([
+        '<b>Genitori → Esporta progressi</b>: scarica un file <code>.json</code> (cartella Download).',
+        'Per ripristinarlo, anche su un altro dispositivo: <b>Genitori → Importa progressi</b>.'
+      ]) + '<p class="small muted">L\'app ricorda di fare il backup dopo 14 giorni. In una finestra di navigazione privata i progressi non vengono salvati.</p>');
+
+    h += sec('ai', '✨ AI facoltativa (Claude)',
+      '<p>Non serve per usare l\'app. Se la attivi, crea esercizi nuovi sugli argomenti più deboli e controlla le risposte scritte non previste, con una spiegazione su misura.</p>' + steps([
+        'Crea una chiave API su <a href="https://console.anthropic.com/" target="_blank" rel="noopener">console.anthropic.com</a> e imposta un <b>limite di spesa mensile</b>.',
+        'In <b>Genitori → AI facoltativa</b> incolla la chiave, attiva "Usa l\'AI", scegli il modello e premi <b>Prova la chiave</b>.'
+      ]) + '<p class="small muted">La chiave resta solo nel browser di quel dispositivo (va inserita su ognuno) e non viene sincronizzata né salvata nei backup. Senza chiave o senza internet l\'app usa gli esercizi offline.</p>');
+
+    h += sec('faq', '❓ Domande frequenti',
+      faq('Devo reinserire il token ogni volta?', 'No. Resta salvato su ogni dispositivo. Va reinserito solo se si cancellano i dati del browser, se si usa una finestra privata o quando il token scade.') +
+      faq('Ho cambiato tablet o ho cancellato i dati: ho perso i progressi?', 'No, se la sincronizzazione era attiva: ricollega il dispositivo (QR, link o token) e i progressi tornano. Senza sincronizzazione serve un backup da importare.') +
+      faq('Compare ☁️⚠️ "token non valido o scaduto". Che faccio?', 'Crea un nuovo token (stessi passaggi). Su un dispositivo: <b>Genitori → Disattiva su questo dispositivo</b>, incolla il nuovo token e attiva; poi ricollega gli altri con il nuovo link/QR. I progressi restano.') +
+      faq('Se usa due dispositivi senza internet, cosa succede?', 'Quando tornano online i progressi vengono <b>uniti</b>: nessuna sessione si perde e vale il livello più alto raggiunto.') +
+      faq('Chi può vedere i progressi?', 'Sono in un Gist <b>segreto</b> del tuo account GitHub: non è elencato pubblicamente, ma chi conosce il suo link (o il link di collegamento) può leggerlo. Contiene solo il nome e i risultati degli esercizi. Il link di collegamento mandalo solo ai tuoi dispositivi.') +
+      faq('Perché una sessione dura più di 10 esercizi?', 'Perché finisce con 10 risposte <b>corrette</b>: ogni errore aggiunge un esercizio (con spiegazione e variante). È voluto: si impara proprio lì.') +
+      faq('Il livello sembra troppo facile o troppo difficile.', 'Rifai il <b>test di livello</b> (Home → Rifai il test): non cancella i progressi, può alzare il livello e segnala gli argomenti da ripassare. Comunque il sistema si adatta da solo sessione dopo sessione.') +
+      faq('Come si ricomincia da zero?', '<b>Genitori → Azzera tutti i progressi</b>. Con la sincronizzazione attiva l\'azzeramento vale per tutti i dispositivi.')
+    );
+
+    render(h, 'guide');
+    bindActions();
+    UI.$$('[data-goto]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var t = document.getElementById(b.getAttribute('data-goto'));
+        if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
+  }
+
   /* ================= PROGRESSI ================= */
   function progress() {
     if (!state.level) {
@@ -1007,6 +1124,7 @@
         '<div class="field"><label for="sync-token">Token GitHub</label><input class="text-input" id="sync-token" type="password" autocomplete="off" placeholder="github_pat_..."></div>' +
         '<div class="row"><button class="btn" data-p="sync-on">Attiva sincronizzazione</button><span id="sync-status" class="small muted"></span></div>';
     }
+    h += '<p class="small"><button class="btn ghost" data-nav="guide" style="padding:4px 0">📖 Guida passo passo alla sincronizzazione</button></p>';
     h += '<p class="small muted">I progressi stanno in un Gist <b>segreto</b> del tuo account: non è elencato pubblicamente, ma chi conosce il link può leggerlo (contiene solo il nome e i risultati degli esercizi). Il token resta solo in questo browser e non finisce nei backup.</p></div>';
     return h;
   }

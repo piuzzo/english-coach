@@ -25,7 +25,7 @@ Web app offline per allenare l'inglese di uno studente italiano di prima superio
 | `js/session.js` | motore sessione: pool core/review/stretch (60/25/15), no argomento ripetuto di fila, varianti dopo errore, impalcatura (gradino −1, poi solo `mc`), snapshot per riprendere |
 | `js/ai.js` | Claude API facoltativa via `fetch` diretto dal browser (header `anthropic-dangerous-direct-browser-access`), output JSON strutturato, `sanitize()` valida ogni esercizio generato |
 | `js/sync.js` | sincronizzazione tra dispositivi via Gist segreto GitHub (`english-coach-progress.json`): `merge()` puro (unione di sessioni per `start`, argomenti/esercizi per `last`, livello = il più alto, streak ricalcolata, `resetAt` più recente vince), client REST GitHub, `syncNow()` = scarica → unisci → carica solo se cambiato |
-| `js/ui.js`, `js/app.js` | componenti grafici e schermate (home, test, sessione, riepilogo, progressi, area genitore) |
+| `js/ui.js`, `js/app.js` | componenti grafici e schermate (home, test, sessione, riepilogo, progressi, area genitore, guida) |
 | `css/style.css` | design token su `:root`, tema scuro automatico, responsive |
 
 ## Regole pedagogiche da preservare
@@ -45,6 +45,10 @@ Web app offline per allenare l'inglese di uno studente italiano di prima superio
 ## Link di collegamento
 
 `#collega=<token>` nel frammento dell'URL (mai inviato al server), creato da `EC.sync.makeLink` e letto da `EC.sync.parseLink` (accetta solo `[A-Za-z0-9_]{20,255}`). Da file:// il link punta all'indirizzo pubblico. Su iPad/iPhone in Safari il frammento resta nell'indirizzo e il manifest non viene collegato: così "Aggiungi alla schermata Home" salva il link e l'icona (che ha una memoria separata da Safari) si collega da sola al primo avvio. Il QR usa `js/vendor/qrcode.js` (qrcode-generator 1.4.4, MIT, incluso così com'è).
+
+## Guida in-app
+
+La schermata **Guida** (`guide()` in `js/app.js`) contiene le istruzioni per studente, installazione, sincronizzazione, backup, AI e FAQ, e rileva il dispositivo (`deviceInfo()`). Se cambi un flusso (sync, link, installazione, backup) aggiorna **sia la Guida sia `README.md`**.
 
 ## Comandi
 
