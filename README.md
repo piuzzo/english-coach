@@ -32,14 +32,31 @@ Non serve installare nulla e non serve internet, a parte l'AI facoltativa descri
 - **713 esercizi** scritti e controllati, tra cui 16 brani di lettura con 80 domande.
 - **13 generatori** che combinano soggetti, verbi e contesti e producono migliaia di varianti sempre nuove.
 
-## Usarlo su più computer
+## Usarlo su più dispositivi (sincronizzazione automatica)
 
-La cartella `english-coach` si può copiare ovunque: su chiavetta, su Google Drive o su un altro PC. I **progressi** però restano salvati nel browser del computer su cui si usa. Per spostarli:
+I progressi si possono **sincronizzare da soli** tra Mac, PC e iPad. Vengono salvati in un file **segreto** sul tuo account GitHub (un Gist).
 
-1. **Area genitore → Esporta progressi** scarica un file `.json`.
-2. Sull'altro computer apri l'app e usa **Area genitore → Importa progressi**.
+**Si configura una volta sola:**
 
-Conviene esportare un backup ogni tanto. L'app lo ricorda da sola dopo 14 giorni.
+1. Su GitHub apri **Settings → Developer settings → Fine-grained tokens → Generate new token** (link diretto: https://github.com/settings/personal-access-tokens/new).
+2. Come nome scrivi *English Coach*; come scadenza, 1 anno.
+3. In **Permissions → Account permissions** imposta **Gists** su **Read and write**. Nient'altro: così il token non può toccare i tuoi repository.
+4. Genera il token e copialo (inizia con `github_pat_`).
+5. **Su ogni dispositivo** incollalo in **Area genitore → Sincronizzazione tra dispositivi**. Su un dispositivo nuovo puoi farlo anche dalla prima schermata, con il pulsante *"Hai già usato English Coach su un altro dispositivo? Collegalo"*.
+
+**Come funziona:**
+
+- **Quando avviene**: la sincronizzazione parte all'apertura dell'app, prima e dopo ogni sessione, durante gli esercizi e quando si chiude la pagina.
+- **Unione dei dati**: i dati dei dispositivi vengono **uniti**, quindi le sessioni fatte offline non si perdono.
+  - Il livello più alto raggiunto vale per tutti.
+  - Una sessione interrotta su un dispositivo si riprende sull'altro.
+- **Stato**: un'icona ☁️ in alto mostra lo stato: ✓ sincronizzato, offline, oppure ⚠️ errore.
+- **Azzeramento**: azzerare i progressi con la sincronizzazione attiva vale per tutti i dispositivi.
+- **Sicurezza**:
+  - Il token e la chiave dell'AI restano solo nel browser di ciascun dispositivo.
+  - Il Gist è "segreto": non è elencato pubblicamente, ma chi ha il link può leggerlo. Contiene solo il nome e i risultati degli esercizi.
+
+**Senza sincronizzazione** i progressi restano nel browser del computer. Si possono comunque spostare a mano con **Area genitore → Esporta / Importa progressi**, che usa un file `.json`. Conviene esportare un backup ogni tanto: l'app lo ricorda da sola dopo 14 giorni.
 Attenzione: in una finestra di navigazione privata i progressi non vengono salvati.
 
 ## AI facoltativa (Claude)

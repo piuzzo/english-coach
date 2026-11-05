@@ -21,6 +21,42 @@
   var PRAISE = ['Giusto!', 'Esatto!', 'Perfetto!', 'Ottimo!', 'Bravo!', 'Ben fatto!', 'Proprio così!', 'Great job!', 'Well done!'];
 
   function save() { EC.storage.save(state); }
+
+  /* ---------- sincronizzazione tra dispositivi ---------- */
+  // Sostituisce il contenuto di "state" mantenendo lo stesso oggetto (la sessione in corso lo usa).
+  function adopt(next) {
+    if (next && next !== state) {
+      Object.keys(state).forEach(function (k) { if (!(k in next)) delete state[k]; });
+      Object.keys(next).forEach(function (k) { state[k] = next[k]; });
+    }
+    save();
+  }
+  function syncNow(opts) {
+    opts = opts || {};
+    if (!EC.sync.enabled(state)) return Promise.resolve(false);
+    var p = EC.sync.syncNow(state).then(function (res) {
+      adopt(res.state);
+      L._resetCache();
+      return res.changed;
+    }, function () { return false; });
+    if (!opts.timeout) return p;
+    return Promise.race([p, new Promise(function (r) { setTimeout(function () { r(false); }, opts.timeout); })]);
+  }
+  var syncTimer = null;
+  function syncSoon(ms) {
+    if (!EC.sync.enabled(state)) return;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(function () { syncNow(); }, ms || 15000);
+  }
+  function rerenderIfIdle() {
+    if (ctx.session || ctx.placement) return;
+    if (document.querySelector('.modal-backdrop')) return;
+    go(ctx.screen);
+  }
+  EC.sync.onStatus(function () { updateTopbar(); });
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden' && EC.sync.enabled(state)) { clearTimeout(syncTimer); syncNow(); }
+  });
   function topicOf(item) { return EC.data.topicById[item.topic] || { title: item.topic, level: '' }; }
 
   /* ================= navigazione ================= */
@@ -37,7 +73,14 @@
     var el = document.getElementById('topbar-level');
     if (!el) return;
     var nav = [['home', 'Home'], ['progress', 'Progressi'], ['parent', 'Genitori']];
-    el.innerHTML = (state.level ? UI.levelBadge(state.level) : '') + nav.map(function (n) {
+    var sy = '';
+    if (EC.sync.enabled(state)) {
+      var st = EC.sync.status.state;
+      var icon = st === 'syncing' ? '<span class="spinner"></span>' : st === 'ok' ? '☁️✓' : st === 'offline' ? '☁️ offline' : st === 'error' ? '☁️⚠️' : '☁️';
+      var title = st === 'ok' ? 'Progressi sincronizzati' : st === 'syncing' ? 'Sincronizzazione in corso' : st === 'offline' ? 'Offline: sincronizzerò appena torna la connessione' : st === 'error' ? 'Errore di sincronizzazione: ' + EC.sync.status.message : 'Sincronizzazione attiva';
+      sy = '<button class="sync-chip sync-' + st + '" type="button" data-nav="parent" title="' + esc(title) + '" aria-label="' + esc(title) + '">' + icon + '</button>';
+    }
+    el.innerHTML = sy + (state.level ? UI.levelBadge(state.level) : '') + nav.map(function (n) {
       var cur = ctx.screen === n[0] ? ' aria-current="page"' : '';
       return '<button class="nav-btn" type="button" data-nav="' + n[0] + '"' + cur + '>' + n[1] + '</button>';
     }).join('');
@@ -129,8 +172,10 @@
       '<p class="muted">Un allenamento di inglese su misura: un test per capire il tuo livello, poi brevi sessioni di esercizi sempre diversi. Quando sbagli, ti spiego il perché.</p>' +
       '<div class="field" style="text-align:left"><label for="name">Come ti chiami?</label>' +
       '<input id="name" class="text-input" autocomplete="given-name" maxlength="30" placeholder="Il tuo nome"></div>' +
-      '<button class="btn lg block" id="go">Iniziamo →</button></div>';
+      '<button class="btn lg block" id="go">Iniziamo →</button>' +
+      '<button class="btn ghost block" id="link-device">☁️ Hai già usato English Coach su un altro dispositivo? Collegalo</button></div>';
     render(h, 'home');
+    UI.$('#link-device').addEventListener('click', linkDeviceModal);
     var inp = UI.$('#name');
     inp.focus();
     function go2() {
@@ -142,6 +187,19 @@
     }
     UI.$('#go').addEventListener('click', go2);
     inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') go2(); });
+  }
+
+  function linkDeviceModal() {
+    var m = UI.modal('<h2>☁️ Collega questo dispositivo</h2><p class="muted" style="margin-top:8px">Incolla lo stesso token GitHub usato sull\'altro dispositivo: i progressi verranno scaricati qui.</p>' +
+      '<details style="margin-top:10px"><summary class="small" style="cursor:pointer;color:var(--primary);font-weight:700">Non hai ancora un token? Ecco come crearlo</summary>' + syncHowTo() + '</details>' +
+      '<div class="field" style="margin-top:14px"><label for="sync-token">Token GitHub</label><input class="text-input" id="sync-token" type="password" autocomplete="off" placeholder="github_pat_..."></div>' +
+      '<p id="sync-status" class="small muted" style="margin-top:8px"></p>' +
+      '<div class="actions"><button class="btn secondary" data-modal="cancel">Annulla</button><button class="btn" id="sync-go">Collega</button></div>', { closeOnAction: true });
+    UI.$('#sync-go', m.el).addEventListener('click', function () {
+      activateSync(UI.$('#sync-token', m.el).value.trim()).then(function () { m.close(); home(); }, function (e) {
+        UI.$('#sync-status', m.el).innerHTML = '<span style="color:var(--bad);font-weight:700">✗ ' + esc(e.message) + '</span>';
+      });
+    });
   }
 
   function bindActions() {
@@ -365,6 +423,7 @@
     if (first) L.initFromPlacement(state, r);
     else L.applyRetake(state, r);
     save();
+    syncNow();
     ctx.placement = null;
     var lvl = state.level;
     var estTxt = r.estimated
@@ -399,6 +458,19 @@
 
   /* ================= SESSIONE ================= */
   function startSession() {
+    if (EC.sync.enabled(state) && !ctx.session) {
+      render('<div class="card center stack" style="max-width:420px;margin:40px auto"><div class="row" style="justify-content:center"><span class="spinner"></span> Sincronizzo i progressi…</div></div>', 'home');
+      ctx.session = 'pending';
+      return syncNow({ timeout: 5000 }).then(function () {
+        if (ctx.session !== 'pending') return; // l'utente è andato altrove nel frattempo
+        ctx.session = null;
+        startSessionNow();
+      });
+    }
+    startSessionNow();
+  }
+
+  function startSessionNow() {
     if (!state.level) { state.level = 'A1'; state.levelHistory.push({ level: 'A1', date: U.today(), reason: 'manual' }); }
     var resume = state.activeSession && state.activeSession.answered > 0 ? state.activeSession : null;
     ctx.session = EC.session.create(state, { resume: resume });
@@ -478,6 +550,7 @@
       if (ctx.session !== s) return;
       var ev = s.answer(given, opts);
       save();
+      syncSoon(20000);
       if (!ev) return;
       if (item.type === 'mc') ctrl.markMc(given, item.answers[0]);
       if (ev.correct) UI.updateRing(ev.correctCount, s.target);
@@ -551,6 +624,8 @@
     var s = ctx.session;
     var sum = s.finish();
     save();
+    clearTimeout(syncTimer);
+    syncNow();
     ctx.session = null;
     hideAiChip();
     var pct = sum.firstTryTotal ? Math.round(sum.firstTryCorrect / sum.firstTryTotal * 100) : 0;
@@ -704,12 +779,14 @@
         state.levelHistory.map(function (x) { return '<li>' + UI.fmtDay(x.date) + ': <b>' + esc(x.level) + '</b> <span class="muted">(' + esc(reason[x.reason] || x.reason) + ')</span></li>'; }).join('') + '</ul></div>';
     }
 
+    h += syncCardHtml();
+
     // backup
-    h += '<div class="card stack" style="margin-top:16px"><h2>💾 Backup e uso su più computer</h2>' +
-      '<p class="muted">I progressi sono salvati in questo browser. Per spostarli su un altro computer (o per sicurezza) esporta un file di backup e importalo dall\'altra parte. Ultimo backup: <b>' +
+    h += '<div class="card stack" style="margin-top:16px"><h2>💾 Backup manuale</h2>' +
+      '<p class="muted">I progressi sono salvati in questo browser. Puoi anche esportarli in un file (per sicurezza, o per spostarli senza sincronizzazione) e importarli altrove. Ultimo backup: <b>' +
       (state.lastBackupAt ? UI.fmtDay(U.dayString(state.lastBackupAt)) : 'mai') + '</b>.</p>' +
       '<div class="row"><button class="btn" data-p="export">Esporta progressi</button><button class="btn secondary" data-p="import">Importa progressi</button></div>' +
-      '<p class="small muted">Il backup non contiene la chiave API.</p></div>';
+      '<p class="small muted">Il backup non contiene la chiave API né il token di sincronizzazione.</p></div>';
 
     // AI
     var s = state.settings;
@@ -737,12 +814,32 @@
 
   function parentAction(a) {
     if (a === 'export') return exportBackup();
+    if (a === 'sync-on') {
+      var tok = UI.$('#sync-token').value.trim();
+      return activateSync(tok).then(function () { parent(); }, function (e) {
+        var el = UI.$('#sync-status');
+        if (el) el.innerHTML = '<span style="color:var(--bad);font-weight:700">✗ ' + esc(e.message) + '</span>';
+      });
+    }
+    if (a === 'sync-now') {
+      return EC.sync.syncNow(state).then(function (res) { adopt(res.state); L._resetCache(); UI.toast('Progressi sincronizzati ✓'); parent(); },
+        function (e) { UI.toast(e.message, 4000); parent(); });
+    }
+    if (a === 'sync-off') {
+      return UI.confirm('Disattivare la sincronizzazione?', 'Su questo dispositivo i progressi resteranno salvati ma non verranno più condivisi. Il file su GitHub non viene cancellato.', 'Disattiva').then(function (ok) {
+        if (!ok) return;
+        EC.sync.disable(state);
+        save();
+        parent();
+      });
+    }
     if (a === 'import') {
       return UI.pickFile('.json,application/json').then(function (text) {
         return UI.confirm('Importare il backup?', 'I progressi attuali su questo computer verranno sostituiti da quelli del file.', 'Importa', true).then(function (ok) {
           if (!ok) return;
-          state = EC.storage.importJson(text);
+          adopt(EC.storage.importJson(text));
           L._resetCache();
+          syncNow();
           UI.toast('Progressi importati ✓');
           parent();
         });
@@ -778,12 +875,56 @@
     if (a === 'reset') {
       UI.confirm('Azzerare tutto?', 'Verranno cancellati livello, progressi, statistiche e storico di questo computer. Consiglio: esporta prima un backup.', 'Sì, azzera', true).then(function (ok) {
         if (!ok) return;
-        state = EC.storage.reset();
+        adopt(EC.storage.reset());
         L._resetCache();
+        if (EC.sync.enabled(state)) EC.sync.pushReplace(state).then(save, function () {});
         UI.toast('Progressi azzerati');
         home();
       });
     }
+  }
+
+  var TOKEN_URL = 'https://github.com/settings/personal-access-tokens/new';
+
+  function syncHowTo() {
+    return '<ol class="stack small" style="margin:6px 0 0;padding-left:20px">' +
+      '<li>Su GitHub apri <a href="' + TOKEN_URL + '" target="_blank" rel="noopener">Settings → Developer settings → Fine-grained tokens → Generate new token</a>.</li>' +
+      '<li>Nome: <b>English Coach</b>. Scadenza: 1 anno (o "No expiration").</li>' +
+      '<li>In <b>Permissions → Account permissions</b> imposta <b>Gists</b> su <b>Read and write</b>. Nient\'altro: il token non potrà toccare i tuoi repository.</li>' +
+      '<li>Premi <b>Generate token</b> e copia il codice (inizia con <code>github_pat_</code>).</li>' +
+      '<li>Incollalo qui su <b>ogni dispositivo</b> (Mac, PC, iPad): il primo crea il file dei progressi, gli altri lo ritrovano e uniscono i dati.</li></ol>';
+  }
+
+  function syncCardHtml() {
+    var c = state.settings.sync || {};
+    var h = '<div class="card stack" style="margin-top:16px"><h2>☁️ Sincronizzazione tra dispositivi</h2>';
+    if (EC.sync.enabled(state)) {
+      var st = EC.sync.status;
+      h += '<p><span class="chip ok">Attiva su questo dispositivo</span></p>' +
+        '<p class="muted">Ultima sincronizzazione: <b>' + (c.lastSyncAt ? new Date(c.lastSyncAt).toLocaleString('it-IT', { dateStyle: 'medium', timeStyle: 'short' }) : '—') + '</b>' +
+        (st.state === 'error' || st.state === 'offline' ? ' · <span style="color:var(--bad)">' + esc(st.message) + '</span>' : '') + '</p>' +
+        '<p class="small muted">I progressi si sincronizzano da soli all\'apertura, prima e dopo ogni sessione e durante gli esercizi. ' +
+        (c.gistId ? 'File dei progressi: <a href="https://gist.github.com/' + esc(c.gistId) + '" target="_blank" rel="noopener">Gist su GitHub</a>.' : '') + '</p>' +
+        '<div class="row"><button class="btn" data-p="sync-now">Sincronizza ora</button><button class="btn secondary" data-p="sync-off">Disattiva su questo dispositivo</button></div>';
+    } else {
+      h += '<p class="muted">Collega questo dispositivo al tuo account GitHub: i progressi verranno condivisi in automatico tra Mac, PC e iPad (si uniscono anche le sessioni fatte offline).</p>' +
+        syncHowTo() +
+        '<div class="field"><label for="sync-token">Token GitHub</label><input class="text-input" id="sync-token" type="password" autocomplete="off" placeholder="github_pat_..."></div>' +
+        '<div class="row"><button class="btn" data-p="sync-on">Attiva sincronizzazione</button><span id="sync-status" class="small muted"></span></div>';
+    }
+    h += '<p class="small muted">I progressi stanno in un Gist <b>segreto</b> del tuo account: non è elencato pubblicamente, ma chi conosce il link può leggerlo (contiene solo il nome e i risultati degli esercizi). Il token resta solo in questo browser e non finisce nei backup.</p></div>';
+    return h;
+  }
+
+  function activateSync(token) {
+    var el = UI.$('#sync-status');
+    if (el) el.innerHTML = '<span class="spinner"></span> Collegamento…';
+    return EC.sync.setup(state, token).then(function (res) {
+      adopt(res.state);
+      L._resetCache();
+      UI.toast(res.created ? 'Sincronizzazione attivata: file dei progressi creato ✓' : 'Collegato! Progressi uniti con gli altri dispositivi ✓', 3500);
+      return res;
+    });
   }
 
   function exportBackup() {
@@ -800,4 +941,6 @@
   // accesso per i test automatici nel browser (nessun effetto sull'uso normale)
   EC._app = { ctx: ctx, getState: function () { return state; } };
   home();
+  if (EC.sync.enabled(state)) syncNow().then(function (changed) { if (changed) rerenderIfIdle(); });
+  window.addEventListener('online', function () { if (EC.sync.enabled(state)) syncNow().then(function (c) { if (c) rerenderIfIdle(); }); });
 })();

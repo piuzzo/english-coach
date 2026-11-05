@@ -427,3 +427,13 @@ select.text-input { padding: 12px 14px; font-size: 1rem; }
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
   .confetti { display: none; }
 }
+
+/* ---------- sincronizzazione ---------- */
+.sync-chip {
+  display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); background: var(--surface);
+  border-radius: 10px; padding: 4px 9px; font-size: .8rem; font-weight: 700; color: var(--text-2); cursor: pointer; min-height: 30px;
+}
+.sync-chip.sync-ok { border-color: var(--ok-border); background: var(--ok-soft); color: var(--ok); }
+.sync-chip.sync-error { border-color: var(--bad-border); background: var(--bad-soft); color: var(--bad); }
+.sync-chip.sync-offline { color: var(--text-3); }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em; padding: 1px 5px; border-radius: 6px; background: var(--surface-3); }

@@ -345,5 +345,121 @@ section('AI (validazione offline, senza chiamate di rete)');
   ok(!EC.ai.enabled(st), 'AI attiva senza chiave');
 }
 
-console.log(`\n${failures ? '✗' : '✓'} ${passes} controlli superati, ${failures} falliti`);
-process.exit(failures ? 1 : 0);
+/* ================= 9. sincronizzazione tra dispositivi ================= */
+section('Sincronizzazione tra dispositivi (GitHub Gist simulato)');
+(async () => {
+  // --- finto GitHub in memoria ---
+  const gists = {};
+  let nextId = 1, calls = 0, online = true;
+  const TOKEN = 'github_pat_TEST';
+  function reply(status, body) { return { ok: status < 300, status, json: async () => body, text: async () => JSON.stringify(body) }; }
+  globalThis.fetch = async (url, opts = {}) => {
+    calls++;
+    if (!online) throw new TypeError('Failed to fetch');
+    if ((opts.headers || {}).Authorization !== 'Bearer ' + TOKEN) return reply(401, { message: 'Bad credentials' });
+    const u = new URL(url);
+    const m = u.pathname.match(/^\/gists(?:\/(\w+))?$/);
+    if (!m) return reply(404, {});
+    const method = opts.method || 'GET';
+    if (!m[1] && method === 'GET') return reply(200, Object.values(gists).map((g) => ({ id: g.id, updated_at: g.updated_at, files: { [Object.keys(g.files)[0]]: {} } })));
+    if (!m[1] && method === 'POST') {
+      const b = JSON.parse(opts.body); const id = 'g' + nextId++;
+      gists[id] = { id, public: b.public, files: b.files, updated_at: new Date().toISOString() };
+      return reply(201, { id });
+    }
+    const g = gists[m[1]];
+    if (!g) return reply(404, { message: 'Not Found' });
+    if (method === 'GET') return reply(200, { id: g.id, files: Object.fromEntries(Object.entries(g.files).map(([k, v]) => [k, { content: v.content, truncated: false }])) });
+    if (method === 'PATCH') { const b = JSON.parse(opts.body); Object.assign(g.files, b.files); g.updated_at = new Date().toISOString(); return reply(200, { id: g.id }); }
+    return reply(405, {});
+  };
+
+  // tre "dispositivi" che condividono lo stesso orologio simulato
+  const env = freshEnv(31);
+  const { EC } = env;
+  const S = EC.sync;
+  const newDevice = () => { const st = EC.storage.defaultState(); return st; };
+  const mac = newDevice();
+  mac.profile.name = 'Marco';
+  mac.settings.apiKey = 'sk-ant-SEGRETO';
+  mac.level = 'A2';
+  const student = makeStudent(EC, { pErr: 0.2, seed: 8 });
+  const sessOn = (st, seed) => {
+    const sv = env.state; env.state = st;
+    const r = runSession(env, student, { seed });
+    env.state = sv; return r;
+  };
+
+  // 1. il Mac attiva la sincronizzazione: crea il Gist
+  sessOn(mac, 1);
+  let r = await S.setup(mac, TOKEN);
+  ok(r.created && Object.keys(gists).length === 1, 'setup sul primo dispositivo dovrebbe creare un Gist');
+  ok(gists[mac.settings.sync.gistId].public === false, 'il Gist deve essere segreto (public: false)');
+  const content = Object.values(gists)[0].files[S.FILE].content;
+  ok(!content.includes('sk-ant-SEGRETO') && !content.includes(TOKEN), 'il Gist non deve contenere chiave AI o token');
+
+  // 2. l'iPad (nuovo) si collega: ritrova il Gist e scarica i progressi
+  const ipad = newDevice();
+  env.advanceDays(1);
+  r = await S.setup(ipad, TOKEN);
+  const ipadState = r.state;
+  ok(!r.created && Object.keys(gists).length === 1, 'il secondo dispositivo deve ritrovare il Gist esistente, non crearne uno nuovo');
+  ok(ipadState.profile.name === 'Marco' && ipadState.level === 'A2' && ipadState.sessions.length === 1, 'il secondo dispositivo non ha ricevuto i progressi');
+  ok(ipadState.settings.apiKey === '' && ipadState.settings.sync.token === TOKEN, 'le impostazioni devono restare quelle locali del dispositivo');
+
+  // 3. entrambi lavorano OFFLINE, poi si sincronizzano: nessuna sessione persa
+  sessOn(mac, 2); env.advanceDays(1);
+  sessOn(ipadState, 3); sessOn(ipadState, 4);
+  online = false;
+  let threw = null;
+  try { await S.syncNow(mac); } catch (e) { threw = e; }
+  ok(threw && threw.offline && S.status.state === 'offline', 'senza rete la sincronizzazione deve segnalare "offline"');
+  online = true;
+  const a = await S.syncNow(mac);      // Mac carica le sue 2 sessioni
+  const b = await S.syncNow(ipadState); // iPad unisce: 1 + 1 (Mac) + 2 (iPad) = 4
+  const c = await S.syncNow(a.state);  // Mac riceve quelle dell'iPad
+  ok(b.state.sessions.length === 4 && c.state.sessions.length === 4, `sessioni dopo l'unione: iPad ${b.state.sessions.length}, Mac ${c.state.sessions.length} (attese 4)`);
+  if (!S.sameData(b.state, c.state)) {
+    const pb = S.publicCopy(b.state), pc = S.publicCopy(c.state);
+    Object.keys(pb).forEach((k) => { if (k !== 'updatedAt' && JSON.stringify(pb[k]) !== JSON.stringify(pc[k])) console.log('    diff in', k, JSON.stringify(pb[k]).slice(0, 200), '\n      vs', JSON.stringify(pc[k]).slice(0, 200)); });
+  }
+  ok(S.sameData(b.state, c.state), 'dopo la sincronizzazione i due dispositivi devono avere gli stessi dati');
+  ok(c.state.streak.count === 3, 'la serie di giorni consecutivi va ricalcolata unendo i dispositivi: ' + c.state.streak.count);
+
+  // 4. l'unione è stabile: rifarla non cambia nulla e non ricarica
+  const before = calls;
+  const again = await S.syncNow(c.state);
+  ok(!again.changed && S.sameData(again.state, c.state), 'una seconda sincronizzazione non deve cambiare i dati');
+  ok(calls - before === 1, 'senza novità basta leggere il Gist, senza riscriverlo (chiamate: ' + (calls - before) + ')');
+
+  // 5. livello: se un dispositivo sale di livello, sale anche l'altro
+  const m1 = EC.util.clone(c.state); m1.level = 'B1'; m1.updatedAt += 10;
+  ok(S.merge(b.state, m1).level === 'B1' && S.merge(m1, b.state).level === 'B1', 'il livello più alto deve vincere');
+
+  // 6. sessione in corso già completata altrove: non va riproposta
+  const x = EC.util.clone(c.state); x.activeSession = { start: x.sessions[0].start, answered: 3, correct: 3, log: [] };
+  ok(S.merge(x, c.state).activeSession === null, 'una sessione già completata non deve restare "in corso"');
+  const y = EC.util.clone(c.state); y.activeSession = { start: 999, answered: 5, correct: 4, log: [] };
+  ok(S.merge(c.state, y).activeSession && S.merge(c.state, y).activeSession.start === 999, 'una sessione in corso su un altro dispositivo va ripresa');
+
+  // 7. azzeramento: vale per tutti i dispositivi
+  EC.storage._setMemory(c.state);
+  const wiped = EC.storage.reset();
+  await S.pushReplace(wiped);
+  const after = await S.syncNow(b.state);
+  ok(after.state.sessions.length === 0 && after.state.level === null, 'dopo un azzeramento gli altri dispositivi devono azzerarsi');
+  ok(after.state.settings.sync.token === TOKEN, 'l\'azzeramento non deve cancellare le impostazioni locali');
+
+  // 8. token sbagliato
+  let err = null;
+  try { await S.setup(newDevice(), 'github_pat_SBAGLIATO'); } catch (e) { err = e; }
+  ok(err && /non valido/.test(err.message), 'un token sbagliato deve dare un messaggio chiaro');
+
+  // 9. backup senza segreti
+  const bk = EC.storage.exportJson(Object.assign(EC.storage.defaultState(), { settings: { apiKey: 'k', aiModel: 'x', sync: { token: TOKEN, enabled: true } } }));
+  ok(!bk.includes(TOKEN) && !bk.includes('"k"'), 'il backup non deve contenere token o chiave');
+
+  console.log(`  3 dispositivi simulati, ${Object.keys(gists).length} Gist, ${calls} chiamate API simulate`);
+  console.log(`\n${failures ? '✗' : '✓'} ${passes} controlli superati, ${failures} falliti`);
+  process.exit(failures ? 1 : 0);
+})().catch((e) => { console.log('  ✗ eccezione nei test di sincronizzazione: ' + (e && e.stack || e)); process.exit(1); });

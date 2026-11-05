@@ -11,7 +11,7 @@ EC.storage = (function () {
 
   function ls() {
     try {
-      if (typeof localStorage === 'undefined') return null;
+      if (typeof window === 'undefined' || typeof localStorage === 'undefined') return null;
       return localStorage;
     } catch (e) {
       return null;
@@ -39,7 +39,10 @@ EC.storage = (function () {
       createdAt: now,
       updatedAt: now,
       profile: { name: '' },
-      settings: { apiKey: '', aiEnabled: false, aiModel: 'claude-opus-5-5' },
+      settings: {
+        apiKey: '', aiEnabled: false, aiModel: 'claude-opus-5-5',
+        sync: { enabled: false, token: '', gistId: '', lastSyncAt: null } // sincronizzazione via GitHub Gist
+      },
       level: null, // livello di lavoro (null = test iniziale non ancora fatto)
       levelHistory: [], // { level, date, reason }
       placements: [], // risultati dei test iniziali
@@ -48,7 +51,8 @@ EC.storage = (function () {
       sessions: [], // riepiloghi delle sessioni concluse
       activeSession: null, // sessione in corso (per riprenderla se si chiude la pagina)
       streak: { last: null, count: 0, best: 0 },
-      lastBackupAt: null
+      lastBackupAt: null,
+      resetAt: null // data dell'ultimo azzeramento (serve alla sincronizzazione tra dispositivi)
     };
   }
 
@@ -58,6 +62,7 @@ EC.storage = (function () {
       if (st[k] === undefined) st[k] = d[k];
     });
     st.settings = Object.assign({}, d.settings, st.settings || {});
+    st.settings.sync = Object.assign({}, d.settings.sync, st.settings.sync || {});
     st.profile = Object.assign({}, d.profile, st.profile || {});
     st.streak = Object.assign({}, d.streak, st.streak || {});
     st.schema = SCHEMA;
@@ -106,7 +111,8 @@ EC.storage = (function () {
   function exportJson(st) {
     st = st || load();
     var copy = EC.util.clone(st);
-    copy.settings.apiKey = ''; // la chiave API non finisce mai nel backup
+    // la chiave API e il token di sincronizzazione non finiscono mai nel backup
+    copy.settings = { aiModel: st.settings.aiModel };
     return JSON.stringify({ app: 'english-coach', exportedAt: new Date().toISOString(), state: copy }, null, 2);
   }
 
@@ -123,18 +129,18 @@ EC.storage = (function () {
     }
     var current = load();
     st = migrate(st);
-    // la chiave API resta quella di questo computer
-    st.settings.apiKey = current.settings.apiKey;
-    st.settings.aiEnabled = current.settings.aiEnabled && !!current.settings.apiKey;
+    // impostazioni (chiave AI, sincronizzazione) restano quelle di questo computer
+    st.settings = EC.util.clone(current.settings);
     memory = st;
     save(st);
     return st;
   }
 
   function reset() {
-    var keepKey = memory ? memory.settings.apiKey : '';
+    var keep = memory ? EC.util.clone(memory.settings) : null;
     memory = defaultState();
-    memory.settings.apiKey = keepKey;
+    if (keep) memory.settings = keep;
+    memory.resetAt = EC.util.now(); // con la sincronizzazione, l'azzeramento vale per tutti i dispositivi
     save(memory);
     return memory;
   }

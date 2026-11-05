@@ -8,7 +8,8 @@ Web app offline per allenare l'inglese di uno studente italiano di prima superio
 - **Ordine degli script = ordine in `index.html`**. `tests/load.js` legge quella lista per caricare gli stessi file in Node: un nuovo file va aggiunto lì, nel punto giusto.
 - I file `js/ui.js` e `js/app.js` sono solo browser (DOM). Tutto il resto deve restare eseguibile in Node.
 - I progressi sono in `localStorage` (chiave `englishCoach.v1`). Lo schema è in `js/storage.js → defaultState()`. Se aggiungi campi, `migrate()` li completa per i dati vecchi: non rompere i backup esistenti.
-- La chiave API non deve mai finire nei backup (`exportJson` la svuota).
+- La chiave API e il token GitHub non devono mai finire nei backup né nel Gist (`exportJson` e `EC.sync.publicCopy` tengono solo `aiModel` delle impostazioni). Le impostazioni sono sempre locali al dispositivo.
+- Sincronizzazione: `app.js` usa `adopt()` per sostituire il contenuto di `state` **mantenendo lo stesso oggetto** (la sessione in corso ne tiene un riferimento). Momenti di sync: avvio, prima di una sessione (max 5 s), 20 s dopo l'ultima risposta, fine sessione/test, pagina nascosta, ritorno online. `merge()` deve restare deterministico e idempotente (testato in `tests/run.js`, sezione 9, con un finto GitHub in memoria).
 
 ## Struttura
 
@@ -23,6 +24,7 @@ Web app offline per allenare l'inglese di uno studente italiano di prima superio
 | `js/placement.js` | test adattivo: blocchi da 7 (≥5 = superato) partendo da A2 + fase diagnostica |
 | `js/session.js` | motore sessione: pool core/review/stretch (60/25/15), no argomento ripetuto di fila, varianti dopo errore, impalcatura (gradino −1, poi solo `mc`), snapshot per riprendere |
 | `js/ai.js` | Claude API facoltativa via `fetch` diretto dal browser (header `anthropic-dangerous-direct-browser-access`), output JSON strutturato, `sanitize()` valida ogni esercizio generato |
+| `js/sync.js` | sincronizzazione tra dispositivi via Gist segreto GitHub (`english-coach-progress.json`): `merge()` puro (unione di sessioni per `start`, argomenti/esercizi per `last`, livello = il più alto, streak ricalcolata, `resetAt` più recente vince), client REST GitHub, `syncNow()` = scarica → unisci → carica solo se cambiato |
 | `js/ui.js`, `js/app.js` | componenti grafici e schermate (home, test, sessione, riepilogo, progressi, area genitore) |
 | `css/style.css` | design token su `:root`, tema scuro automatico, responsive |
 
