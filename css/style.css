@@ -443,3 +443,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
   .actions .hint { display: none; }
   .option, .tile-word, .btn { -webkit-tap-highlight-color: transparent; }
 }
+
+/* codice QR del link di collegamento (sempre su sfondo bianco, anche col tema scuro) */
+.qr { margin: 14px auto 0; width: min(240px, 70vw); padding: 8px; background: #fff; border-radius: 16px; border: 1px solid var(--border); }
+.qr svg { display: block; width: 100%; height: auto; }

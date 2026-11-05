@@ -173,7 +173,8 @@
       '<div class="field" style="text-align:left"><label for="name">Come ti chiami?</label>' +
       '<input id="name" class="text-input" autocomplete="given-name" maxlength="30" placeholder="Il tuo nome"></div>' +
       '<button class="btn lg block" id="go">Iniziamo →</button>' +
-      '<button class="btn ghost block" id="link-device">☁️ Hai già usato English Coach su un altro dispositivo? Collegalo</button></div>';
+      '<button class="btn ghost block" id="link-device">☁️ Hai già usato English Coach su un altro dispositivo? Collegalo</button>' +
+      '<p class="tiny muted">Oppure apri qui il <b>link di collegamento</b> (o inquadra il QR) creato dall\'Area genitore dell\'altro dispositivo.</p></div>';
     render(h, 'home');
     UI.$('#link-device').addEventListener('click', linkDeviceModal);
     var inp = UI.$('#name');
@@ -821,6 +822,7 @@
         if (el) el.innerHTML = '<span style="color:var(--bad);font-weight:700">✗ ' + esc(e.message) + '</span>';
       });
     }
+    if (a === 'sync-link') return showLinkModal();
     if (a === 'sync-now') {
       return EC.sync.syncNow(state).then(function (res) { adopt(res.state); L._resetCache(); UI.toast('Progressi sincronizzati ✓'); parent(); },
         function (e) { UI.toast(e.message, 4000); parent(); });
@@ -885,6 +887,99 @@
   }
 
   var TOKEN_URL = 'https://github.com/settings/personal-access-tokens/new';
+  var PUBLIC_URL = 'https://piuzzo.github.io/english-coach/';
+
+  function isIOS() {
+    var ua = navigator.userAgent || '';
+    return /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  }
+  function isStandalone() {
+    return window.navigator.standalone === true || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+  }
+  // indirizzo da usare nel link: quello online se l'app è aperta come file locale
+  function linkBase() {
+    return /^https?:$/.test(location.protocol) ? location.origin + location.pathname : PUBLIC_URL;
+  }
+
+  /* Apertura di un link di collegamento (#collega=TOKEN) */
+  function handleConnectLink(tok) {
+    // Su iPad/iPhone in Safari teniamo il link nell'indirizzo: se poi si aggiunge l'app alla schermata Home,
+    // l'icona (che ha una memoria separata da Safari) si collegherà da sola al primo avvio.
+    var keepHash = isIOS() && !isStandalone();
+    if (!keepHash) {
+      try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* ignora */ }
+    }
+    if (EC.sync.enabled(state) && state.settings.sync.token === tok) {
+      syncNow().then(function (c) { if (c) rerenderIfIdle(); });
+      return;
+    }
+    var hasLocal = state.sessions.length > 0 || !!state.level;
+    var m = UI.modal('<div class="center"><div class="big-emoji">🔗</div><h2 style="margin-top:8px">Collegare questo dispositivo?</h2></div>' +
+      '<p class="muted" style="margin-top:10px">Hai aperto un link di collegamento di English Coach. I progressi verranno sincronizzati automaticamente con gli altri dispositivi' +
+      (hasLocal ? ' (quelli già presenti qui verranno uniti: non si perde nulla).' : ': nome, livello ed esercizi arriveranno qui.') + '</p>' +
+      '<p id="sync-status" class="small muted" style="margin-top:8px"></p>' +
+      '<div class="actions"><button class="btn secondary" data-modal="cancel">Annulla</button><button class="btn" id="link-go">Collega</button></div>', { closeOnAction: true });
+    UI.$('#link-go', m.el).addEventListener('click', function () {
+      var btn = UI.$('#link-go', m.el);
+      btn.disabled = true;
+      UI.$('#sync-status', m.el).innerHTML = '<span class="spinner"></span> Collegamento…';
+      EC.sync.setup(state, tok).then(function (res) {
+        adopt(res.state);
+        L._resetCache();
+        m.close();
+        home();
+        if (keepHash) {
+          UI.modal('<div class="center"><div class="big-emoji">✅</div><h2 style="margin-top:8px">Collegato!</h2></div>' +
+            '<p class="muted" style="margin-top:10px">Ultimo passo: tocca <b>Condividi</b> (il quadrato con la freccia) → <b>Aggiungi alla schermata Home</b>. ' +
+            'Da quel momento usa l\'icona: la prima volta che la apri ti chiederà di nuovo "Collega", poi non più.</p>' +
+            '<div class="actions"><button class="btn" data-modal="close">Ho capito</button></div>');
+        } else {
+          UI.toast('Dispositivo collegato: progressi sincronizzati ✓', 3500);
+        }
+      }, function (e) {
+        btn.disabled = false;
+        UI.$('#sync-status', m.el).innerHTML = '<span style="color:var(--bad);font-weight:700">✗ ' + esc(e.message) + '</span>';
+      });
+    });
+  }
+
+  function qrSvg(text) {
+    if (typeof qrcode !== 'function') return '';
+    try {
+      var q = qrcode(0, 'L');
+      q.addData(text);
+      q.make();
+      return q.createSvgTag({ cellSize: 4, margin: 4, scalable: true, alt: 'Codice QR del link di collegamento' });
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function showLinkModal() {
+    var link = EC.sync.makeLink(linkBase(), state.settings.sync.token);
+    var svg = qrSvg(link);
+    var canShare = typeof navigator.share === 'function';
+    var m = UI.modal('<h2>🔗 Collega un altro dispositivo</h2>' +
+      (svg ? '<div class="qr">' + svg + '</div>' : '') +
+      '<ol class="stack small" style="margin:14px 0 0;padding-left:20px">' +
+      '<li><b>iPad / iPhone:</b> inquadra il codice con la <b>Fotocamera</b> e tocca il link che compare. In Safari premi <b>Collega</b>, poi <b>Condividi → Aggiungi alla schermata Home</b>.</li>' +
+      '<li><b>Mac / PC:</b> manda il link a quel computer (AirDrop, Messaggi, email a te stesso) e aprilo nel browser.</li></ol>' +
+      '<div class="row" style="margin-top:14px"><input class="text-input grow" id="link-text" readonly value="' + esc(link) + '" style="font-size:.85rem;min-width:0">' +
+      '<button class="btn" id="link-copy">Copia</button>' + (canShare ? '<button class="btn secondary" id="link-share">Condividi</button>' : '') + '</div>' +
+      '<p class="small" style="margin-top:12px;color:var(--warn)">⚠️ Il link contiene la chiave di accesso ai progressi: mandalo solo ai tuoi dispositivi e non pubblicarlo.</p>' +
+      '<div class="actions"><button class="btn secondary" data-modal="close">Chiudi</button></div>');
+    UI.$('#link-copy', m.el).addEventListener('click', function () {
+      var inp = UI.$('#link-text', m.el);
+      var done = function () { UI.toast('Link copiato ✓'); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(link).then(done, function () { inp.select(); document.execCommand('copy'); done(); });
+      } else { inp.select(); document.execCommand('copy'); done(); }
+    });
+    var sh = UI.$('#link-share', m.el);
+    if (sh) sh.addEventListener('click', function () {
+      navigator.share({ title: 'English Coach – collega questo dispositivo', url: link }).catch(function () { /* annullato */ });
+    });
+  }
 
   function syncHowTo() {
     return '<ol class="stack small" style="margin:6px 0 0;padding-left:20px">' +
@@ -905,7 +1000,7 @@
         (st.state === 'error' || st.state === 'offline' ? ' · <span style="color:var(--bad)">' + esc(st.message) + '</span>' : '') + '</p>' +
         '<p class="small muted">I progressi si sincronizzano da soli all\'apertura, prima e dopo ogni sessione e durante gli esercizi. ' +
         (c.gistId ? 'File dei progressi: <a href="https://gist.github.com/' + esc(c.gistId) + '" target="_blank" rel="noopener">Gist su GitHub</a>.' : '') + '</p>' +
-        '<div class="row"><button class="btn" data-p="sync-now">Sincronizza ora</button><button class="btn secondary" data-p="sync-off">Disattiva su questo dispositivo</button></div>';
+        '<div class="row"><button class="btn" data-p="sync-link">🔗 Collega un altro dispositivo</button><button class="btn secondary" data-p="sync-now">Sincronizza ora</button><button class="btn secondary" data-p="sync-off">Disattiva su questo dispositivo</button></div>';
     } else {
       h += '<p class="muted">Collega questo dispositivo al tuo account GitHub: i progressi verranno condivisi in automatico tra Mac, PC e iPad (si uniscono anche le sessioni fatte offline).</p>' +
         syncHowTo() +
@@ -941,6 +1036,12 @@
   // accesso per i test automatici nel browser (nessun effetto sull'uso normale)
   EC._app = { ctx: ctx, getState: function () { return state; } };
   home();
-  if (EC.sync.enabled(state)) syncNow().then(function (changed) { if (changed) rerenderIfIdle(); });
+  var linkTok = EC.sync.parseLink(location.hash);
+  if (linkTok) handleConnectLink(linkTok);
+  else if (EC.sync.enabled(state)) syncNow().then(function (changed) { if (changed) rerenderIfIdle(); });
+  window.addEventListener('hashchange', function () {
+    var t = EC.sync.parseLink(location.hash);
+    if (t) handleConnectLink(t);
+  });
   window.addEventListener('online', function () { if (EC.sync.enabled(state)) syncNow().then(function (c) { if (c) rerenderIfIdle(); }); });
 })();

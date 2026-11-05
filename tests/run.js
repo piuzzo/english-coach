@@ -459,6 +459,18 @@ section('Sincronizzazione tra dispositivi (GitHub Gist simulato)');
   const bk = EC.storage.exportJson(Object.assign(EC.storage.defaultState(), { settings: { apiKey: 'k', aiModel: 'x', sync: { token: TOKEN, enabled: true } } }));
   ok(!bk.includes(TOKEN) && !bk.includes('"k"'), 'il backup non deve contenere token o chiave');
 
+  // 10. link di collegamento
+  const tokReal = 'github_pat_11ABCDEFG0123456789_abcdefghijklmnopqrstuvwxyz';
+  const link = S.makeLink('https://piuzzo.github.io/english-coach/#vecchio', tokReal);
+  ok(link === 'https://piuzzo.github.io/english-coach/#collega=' + tokReal, 'formato del link di collegamento: ' + link);
+  ok(S.parseLink(new URL(link).hash) === tokReal, 'il link non restituisce il token');
+  ok(S.parseLink('#foo=1&collega=' + tokReal) === tokReal, 'parseLink con altri parametri');
+  ok(S.parseLink('#collega=<script>alert(1)</script>') === null, 'parseLink deve rifiutare testo che non è un token');
+  ok(S.parseLink('#altro') === null && S.parseLink('') === null, 'parseLink senza token');
+  ok(typeof globalThis.qrcode === 'function', 'libreria QR non caricata');
+  const q = globalThis.qrcode(0, 'L'); q.addData(link); q.make();
+  ok(q.getModuleCount() >= 21 && /<svg/.test(q.createSvgTag({ cellSize: 4, margin: 4, scalable: true })), 'il codice QR non viene generato');
+
   console.log(`  3 dispositivi simulati, ${Object.keys(gists).length} Gist, ${calls} chiamate API simulate`);
   console.log(`\n${failures ? '✗' : '✓'} ${passes} controlli superati, ${failures} falliti`);
   process.exit(failures ? 1 : 0);

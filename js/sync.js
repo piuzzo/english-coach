@@ -330,6 +330,19 @@ EC.sync = (function () {
 
   function onStatus(fn) { listeners.push(fn); }
 
+  /* ---------- link di collegamento ----------
+   * Il token viaggia nel "frammento" dell'indirizzo (#collega=…), che il browser non invia mai al server. */
+  function makeLink(base, token) {
+    return String(base).split('#')[0] + '#collega=' + encodeURIComponent(token);
+  }
+  function parseLink(hash) {
+    var m = String(hash || '').match(/[#&]collega=([^&]+)/);
+    if (!m) return null;
+    var t;
+    try { t = decodeURIComponent(m[1]).trim(); } catch (e) { return null; }
+    return /^[A-Za-z0-9_]{20,255}$/.test(t) ? t : null; // formato dei token GitHub
+  }
+
   return {
     FILE: FILE,
     merge: merge,
@@ -342,6 +355,8 @@ EC.sync = (function () {
     pushReplace: pushReplace,
     disable: disable,
     onStatus: onStatus,
+    makeLink: makeLink,
+    parseLink: parseLink,
     get status() { return status; },
     _gh: { findGist: findGist, readGist: readGist, createGist: createGist, writeGist: writeGist }
   };

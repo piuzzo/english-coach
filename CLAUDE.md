@@ -42,6 +42,10 @@ Web app offline per allenare l'inglese di uno studente italiano di prima superio
 - `manifest.webmanifest` e `icons/` rendono l'app installabile su iPad/iPhone ("Aggiungi alla schermata Home"); il manifest viene collegato solo su http(s) (su file:// il browser lo rifiuterebbe).
 - L'app deve continuare a funzionare anche aperta in locale da file:// (uso offline su Mac/PC).
 
+## Link di collegamento
+
+`#collega=<token>` nel frammento dell'URL (mai inviato al server), creato da `EC.sync.makeLink` e letto da `EC.sync.parseLink` (accetta solo `[A-Za-z0-9_]{20,255}`). Da file:// il link punta all'indirizzo pubblico. Su iPad/iPhone in Safari il frammento resta nell'indirizzo e il manifest non viene collegato: così "Aggiungi alla schermata Home" salva il link e l'icona (che ha una memoria separata da Safari) si collega da sola al primo avvio. Il QR usa `js/vendor/qrcode.js` (qrcode-generator 1.4.4, MIT, incluso così com'è).
+
 ## Comandi
 
 ```bash

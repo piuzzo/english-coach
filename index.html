@@ -15,7 +15,8 @@
   <link rel="icon" type="image/png" href="icons/icon-192.png">
   <script>
     // il manifest serve solo quando l'app è online (su file:// il browser lo rifiuterebbe)
-    if (/^https?:$/.test(location.protocol)) {
+    // (non quando si apre un link di collegamento: su iPad la schermata Home deve salvare il link completo)
+    if (/^https?:$/.test(location.protocol) && !/collega=/.test(location.hash)) {
       var m = document.createElement('link'); m.rel = 'manifest'; m.href = 'manifest.webmanifest';
       document.head.appendChild(m);
     }
@@ -54,6 +55,7 @@
   <script src="js/session.js"></script>
   <script src="js/ai.js"></script>
   <script src="js/sync.js"></script>
+  <script src="js/vendor/qrcode.js"></script>
   <script src="js/ui.js"></script>
   <script src="js/app.js"></script>
 </body>

@@ -53,7 +53,14 @@ I progressi si possono **sincronizzare da soli** tra Mac, PC e iPad. Vengono sal
 2. Come nome scrivi *English Coach*; come scadenza, 1 anno.
 3. In **Permissions → Account permissions** imposta **Gists** su **Read and write**. Nient'altro: così il token non può toccare i tuoi repository.
 4. Genera il token e copialo (inizia con `github_pat_`).
-5. **Su ogni dispositivo** incollalo in **Area genitore → Sincronizzazione tra dispositivi**. Su un dispositivo nuovo puoi farlo anche dalla prima schermata, con il pulsante *"Hai già usato English Coach su un altro dispositivo? Collegalo"*.
+5. Sul **primo dispositivo** incollalo in **Area genitore → Sincronizzazione tra dispositivi**. È l'unica volta che serve copiarlo.
+6. **Gli altri dispositivi** si collegano con il **link di collegamento**: Area genitore → **🔗 Collega un altro dispositivo**.
+   - **iPad/iPhone:** inquadra il **codice QR** con la Fotocamera e tocca il link. In Safari premi **Collega**, poi *Condividi → Aggiungi alla schermata Home*. L'icona si collega da sola al primo avvio.
+   - **Mac/PC:** premi *Copia* o *Condividi* (AirDrop, Messaggi, email) e apri il link nel browser di quel computer.
+
+   In alternativa, su un dispositivo nuovo puoi incollare il token dalla prima schermata (*"Hai già usato English Coach su un altro dispositivo? Collegalo"*).
+
+Il token resta salvato in ogni dispositivo: **non va reinserito**. Fanno eccezione i casi in cui si cancellano i dati del browser o il token scade. Il link contiene il token, quindi mandalo solo ai tuoi dispositivi e non pubblicarlo.
 
 **Come funziona:**
 
