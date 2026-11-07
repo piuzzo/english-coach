@@ -10,24 +10,26 @@ Web app offline per allenare l'inglese di uno studente italiano di prima superio
 - I progressi sono in `localStorage` (chiave `englishCoach.v1`). Lo schema è in `js/storage.js → defaultState()`. Se aggiungi campi, `migrate()` li completa per i dati vecchi: non rompere i backup esistenti.
 - L'indirizzo email del genitore non va mai scritto nel codice (repo pubblico): sta solo in `state.reports`.
 - La chiave API e il token GitHub non devono mai finire nei backup né nel Gist (`exportJson` e `EC.sync.publicCopy` tengono solo `aiModel` delle impostazioni). Le impostazioni sono sempre locali al dispositivo.
-- Sincronizzazione: `app.js` usa `adopt()` per sostituire il contenuto di `state` **mantenendo lo stesso oggetto** (la sessione in corso ne tiene un riferimento). Momenti di sync: avvio, prima di una sessione (max 5 s), 20 s dopo l'ultima risposta, fine sessione/test, pagina nascosta, ritorno online. `merge()` deve restare deterministico e idempotente (testato in `tests/run.js`, sezione 9, con un finto GitHub in memoria).
+- Sincronizzazione: `app.js` usa `adopt()` per sostituire il contenuto di `state` **mantenendo lo stesso oggetto** (la sessione in corso ne tiene un riferimento). Momenti di sync: avvio, prima di una sessione (max 5 s), 20 s dopo l'ultima risposta, fine sessione/test, pagina nascosta, ritorno online. `merge()` unisce anche `writings` (per `start`) e `activeWriting`; la streak conta sessioni + traduzioni. `merge()` deve restare deterministico e idempotente (testato in `tests/run.js`, sezione 9, con un finto GitHub in memoria).
 
 ## Struttura
 
 | File | Ruolo |
 |---|---|
-| `js/core.js` | namespace `EC`, registro contenuti (`addTopics/addItems/addPassages`), utilità (rng con seme, date locali `YYYY-MM-DD`, `escapeHtml`) |
+| `js/core.js` | namespace `EC`, registro contenuti (`addTopics/addItems/addPassages/addTexts`), utilità (rng con seme, date locali `YYYY-MM-DD`, `escapeHtml`) |
 | `data/topics.js` | 43 argomenti: `id, level, area, title, rule, examples, it, prereq` |
 | `data/grammar-*.js`, `vocab.js`, `reading.js` | banca esercizi (~713). Formato in `docs/FORMATO-ESERCIZI.md` |
+| `data/writing.js` | 12 testi italiani per la traduzione libera (`EC.addTexts`): frasi con `en` accettate, `topics`, `explanation`, `tips` = errori tipici cercati come frammenti dentro la traduzione |
 | `js/matcher.js` | confronto risposte scritte (contrazioni, apostrofi, punteggiatura, `'s`/`'d` ambigui, errori di battitura) |
 | `js/generators.js` | 13 generatori a modello (`{id, topic, tiers, make(tier, rng)}`), forme verbali scritte a mano in tabelle |
 | `js/learner.js` | scatole Leitner 0–5 per argomento, gradino = f(scatola), promozione di livello, streak |
 | `js/placement.js` | test adattivo: blocchi da 7 (≥5 = superato) partendo da A2 + fase diagnostica |
 | `js/session.js` | motore sessione: pool core/review/stretch (60/25/15), no argomento ripetuto di fila, varianti dopo errore, impalcatura (gradino −1, poi solo `mc`), snapshot per riprendere |
-| `js/ai.js` | Claude API facoltativa via `fetch` diretto dal browser (header `anthropic-dangerous-direct-browser-access`), output JSON strutturato, `sanitize()` valida ogni esercizio generato |
+| `js/writing.js` | traduzione libera (puro, testabile): `pickText`/`focusTopics`, valutazione offline (`gradeSentence`: giusta / errore tipico / da autovalutare), `fromAi` e `sanitizeText` per i dati AI, `start`→`setResults`→rinforzo (`drillTopics`/`drillItem`/`recordDrill`)→`finish` (Leitner via `applySession`, streak, `state.writings`). Attività in corso in `state.activeWriting` |
+| `js/ai.js` | Claude API facoltativa via `fetch` diretto dal browser (header `anthropic-dangerous-direct-browser-access`), output JSON strutturato, `sanitize()` valida ogni esercizio generato; `generateText`/`correctTranslation` per la traduzione libera |
 | `js/sync.js` | sincronizzazione tra dispositivi via Gist segreto GitHub (`english-coach-progress.json`): `merge()` puro (unione di sessioni per `start`, argomenti/esercizi per `last`, livello = il più alto, streak ricalcolata, `resetAt` più recente vince), client REST GitHub, `syncNow()` = scarica → unisci → carica solo se cambiato |
 | `js/report.js` | resoconto email a fine sessione via FormSubmit (`POST https://formsubmit.co/ajax/<email>`, JSON, `_template: table`): impostazioni in `state.reports` (sincronizzate, vince `updatedAt` più recente), coda locale `state.settings.mailQueue` (mai sincronizzata né esportata), ritentativi fino a 7 giorni, risposta "needs Activation" = consegnato dopo la conferma |
-| `js/ui.js`, `js/app.js` | componenti grafici e schermate (home, test, sessione, riepilogo, progressi, area genitore, guida) |
+| `js/ui.js`, `js/app.js` | componenti grafici e schermate (home, test, sessione, traduzione libera, riepilogo, progressi, area genitore, guida) |
 | `css/style.css` | design token su `:root`, tema scuro automatico, responsive |
 
 ## Regole pedagogiche da preservare
@@ -35,6 +37,7 @@ Web app offline per allenare l'inglese di uno studente italiano di prima superio
 - La sessione termina **solo** a `EC.session.CFG.TARGET` (10) risposte corrette; un'interruzione non azzera il conteggio (`state.activeSession`).
 - Ogni errore mostra: risposta data, risposta giusta, nota specifica del distrattore (`notes`), spiegazione, regola dell'argomento. Le risposte scritte vanno riscritte prima di proseguire.
 - Ogni opzione sbagliata di una `mc` deve avere una nota in italiano che spiega PERCHÉ è sbagliata.
+- Traduzione libera: ogni frase sbagliata mostra versione dello studente, correzione ed errori spiegati (con argomento e regola), va riscritta, e segue 1–2 esercizi di rinforzo (`EC.writing.CFG.DRILL_MAX`). Senza AI/rete deve funzionare con la banca `data/writing.js`; se l'AI fallisce si degrada alla correzione offline.
 - Ogni argomento deve avere esercizi di tutti e 3 i gradini e gruppi (`group`) con almeno 2 esercizi, così esiste sempre una variante.
 - Parametri pedagogici: `EC.learner.CFG` (intervalli, soglie di promozione) e `EC.session.CFG` (mix, probabilità generatori/AI).
 
@@ -57,7 +60,7 @@ La schermata **Guida** (`guide()` in `js/app.js`) contiene le istruzioni per stu
 ```bash
 node tests/validate.js                    # valida tutta la banca (deve dire "OK: nessun errore.")
 node tests/validate.js data/vocab.js      # valida un solo file
-node tests/run.js                         # tutti i test: banca, generatori, matcher, sessione, test iniziale, progressione, backup, AI
+node tests/run.js                         # tutti i test: banca, generatori, matcher, sessione, test iniziale, progressione, backup, AI, traduzione libera, sync
 ```
 
 Dopo ogni modifica a contenuti o logica: lancia entrambi. I test usano un orologio finto (`EC.util.now`) e rng con seme, quindi sono deterministici.

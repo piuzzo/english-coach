@@ -345,6 +345,94 @@ section('AI (validazione offline, senza chiamate di rete)');
   ok(!EC.ai.enabled(st), 'AI attiva senza chiave');
 }
 
+/* ================= 8b. traduzione libera ================= */
+section('Traduzione libera (testi, correzione offline e AI, progressi)');
+{
+  const env = freshEnv(11);
+  const { EC, state } = env;
+  const W = EC.writing;
+  state.level = 'A2';
+  ok(EC.data.texts.length >= 12, 'servono almeno 12 testi nella banca, trovati ' + EC.data.texts.length);
+  EC.LEVELS.forEach((l) => ok(EC.data.texts.some((t) => t.level === l), 'nessun testo di livello ' + l));
+
+  // confronto per frammenti (parole intere, contrazioni equivalenti)
+  ok(W.containsPhrase("He doesn't works here", 'does not works'), 'containsPhrase deve espandere le contrazioni');
+  ok(!W.containsPhrase('two brothers', 'two brother'), 'containsPhrase deve confrontare parole intere');
+
+  // valutazione offline
+  const s = EC.data.textById.w_a1_presento.sentences[0];
+  ok(W.gradeSentence(s, "my name's Luca and I'm fourteen").status === 'ok', 'traduzione prevista (con contrazioni) va accettata');
+  const g2 = W.gradeSentence(s, 'My name is Luca and I have fourteen years.');
+  ok(g2.status === 'wrong' && g2.errors.length && g2.errors[0].topic === 'be', 'un errore tipico va riconosciuto dentro la frase, con argomento');
+  const g3 = W.gradeSentence(s, 'Luca is my name, I am fourteen.');
+  ok(g3.status === 'check' && g3.model, 'una traduzione non prevista e senza errori noti va autovalutata');
+  W.resolveCheck(g3, true);
+  ok(g3.status === 'ok' && g3.selfAssessed, 'autovalutazione "giusta"');
+  ok(W.gradeSentence(s, '   ').status === 'wrong', 'una frase vuota è sbagliata');
+
+  // correzione AI → formato comune
+  const text = EC.data.textById.w_a2_cucina;
+  const answers = ['At the moment my mother prepares dinner.', "There isn't much milk, but there are some eggs.", 'I have to buy some bread and some cheese.', "You mustn't touch the oven, it's really hot!"];
+  const raw = { sentences: [
+    { n: 1, acceptable: false, corrected: 'At the moment my mother is preparing dinner.', better: '', errors: [{ wrong: 'prepares', right: 'is preparing', why: 'Azione in corso.', topic: 'ps_vs_pc' }], comment: 'Quasi!' },
+    { n: 3, acceptable: false, corrected: 'I have to buy some bread and some cheese.', better: '', errors: [], comment: 'x' },
+    { n: 4, acceptable: true, corrected: "You mustn't touch the oven, it's really hot!", better: "You mustn't touch the oven: it's very hot!", errors: [], comment: 'Bravo!' }
+  ] };
+  const res = W.fromAi(raw, text, answers);
+  ok(res[0].status === 'wrong' && res[0].by === 'ai' && res[0].errors[0].topic === 'ps_vs_pc', 'errore AI non convertito');
+  ok(res[1].status === 'ok' && res[1].by === 'bank', 'una traduzione prevista non deve dipendere dall\'AI');
+  ok(res[2].status === 'ok', 'risposta prevista: giusta anche se l\'AI la segna sbagliata');
+  ok(res[3].status === 'ok' && res[3].model.indexOf('very hot') !== -1, 'accettata dall\'AI, con versione più naturale');
+  ok(W.retypeOk(res[0], text.sentences[0], 'at the moment my mother is preparing dinner'), 'la riscrittura della frase corretta va accettata');
+  ok(!W.retypeOk(res[0], text.sentences[0], 'at the moment my mother prepares dinner'), 'la riscrittura sbagliata va rifiutata');
+  const res2 = W.fromAi({ sentences: [{ n: 1, acceptable: false, corrected: '', better: '', errors: [{ wrong: 'x', right: 'y', why: 'z', topic: 'inventato' }], comment: '' }] }, text, ['My mum prepare dinner now.', '', '', '']);
+  ok(res2[0].status === 'wrong' && res2[0].corrected && res2[0].errors[0].topic === null, 'argomento inventato dall\'AI va scartato, correzione di riserva = modello');
+
+  // testo generato dall'AI
+  const gen = W.sanitizeText({ title: 'Prova', sentences: [
+    { it: 'Ho visto un film.', en: ['I saw a film.', 'I watched a film.'], topics: ['past_simple', 'inventato'], explanation: 'Passato concluso.', tips: [{ wrong: 'i have seen', right: 'I saw', why: '...', topic: 'past_simple' }, { wrong: 'a film', right: '-', why: 'compare nella risposta: da scartare', topic: 'past_simple' }] },
+    { it: 'Senza argomenti validi.', en: ['No topics.'], topics: ['nope'], explanation: '', tips: [] },
+    { it: 'Mio fratello è più alto di me.', en: ['My brother is taller than me.'], topics: ['comparatives'], explanation: 'Comparativo.', tips: [] }
+  ] }, { level: 'A2' });
+  ok(gen && gen.sentences.length === 2 && /^wai_/.test(gen.id) && gen.ai, 'sanitizeText: tiene solo le frasi con argomenti validi');
+  ok(gen.sentences[0].topics.join() === 'past_simple' && gen.sentences[0].tips.length === 1, 'sanitizeText: filtra argomenti e tips incoerenti');
+  ok(W.sanitizeText({ title: 'x', sentences: [] }) === null, 'un testo vuoto va rifiutato');
+
+  // attività completa: errori → rinforzo → progressi
+  const t = W.pickText(state, EC.util.makeRng(3));
+  ok(t && t.level === 'A2', 'pickText deve scegliere un testo del livello di lavoro');
+  W.start(state, text, 'bank');
+  W.setAnswers(state, answers);
+  W.setResults(state, res);
+  ok(W.drillTopics(state.activeWriting).join() === 'ps_vs_pc', 'rinforzo sugli argomenti sbagliati');
+  const di = W.drillItem(state, 'ps_vs_pc', EC.util.makeRng(1));
+  ok(di && di.topic === 'ps_vs_pc', 'esercizio di rinforzo dello stesso argomento');
+  W.recordDrill(state, di, true);
+  env.tick(4 * 60000);
+  const sum = W.finish(state);
+  ok(sum && sum.total === 4 && sum.correct === 3 && sum.errors.length === 1 && sum.minutes === 4, 'riepilogo della traduzione');
+  ok(sum.perTopic.ps_vs_pc.wrong === 1 && sum.perTopic.ps_vs_pc.correct === 1, 'errore e rinforzo contano sull\'argomento');
+  ok(sum.perTopic.modals_obligation.correct >= 1 && state.topics.modals_obligation.box === 1, 'frase giusta: l\'argomento sale di scatola');
+  ok(state.topics.ps_vs_pc.box === 0 && state.topics.ps_vs_pc.due === EC.util.addDays(EC.util.today(), 1), 'argomento sbagliato: torna domani');
+  ok(state.activeWriting === null && state.writings.length === 1 && state.streak.count === 1, 'la traduzione conclusa va in storico e conta per la serie di giorni');
+  ok(W.focusTopics(state, 4)[0] === 'ps_vs_pc', 'la traduzione successiva punta sugli errori di questa');
+  ok(W.pickText(state, EC.util.makeRng(3)).id !== text.id || EC.data.texts.filter((x) => x.level === 'A2').length === 1, 'un testo appena fatto non va riproposto subito');
+  ok(EC.report.buildWriting(state, sum)._subject.indexOf('3/4') !== -1, 'resoconto email della traduzione');
+
+  // sincronizzazione: storico unito e attività in corso
+  const other = EC.storage.defaultState();
+  const m = EC.sync.merge(other, state);
+  ok(m.writings.length === 1 && m.streak.count === 1, 'merge: lo storico delle traduzioni deve unirsi e contare per la serie');
+  ok(EC.sync.merge(m, state).writings.length === 1, 'merge idempotente sulle traduzioni');
+  const st2 = EC.util.clone(state);
+  W.start(st2, text, 'bank');
+  const m2 = EC.sync.merge(state, st2);
+  ok(m2.activeWriting && m2.activeWriting.text.id === text.id, 'merge: la traduzione in corso deve passare all\'altro dispositivo');
+  const old = EC.storage.defaultState(); delete old.writings; delete old.activeWriting;
+  EC.storage._setMemory(old);
+  ok(Array.isArray(EC.storage.load().writings), 'migrate deve aggiungere writings ai dati vecchi');
+}
+
 /* ================= 9. sincronizzazione tra dispositivi ================= */
 section('Sincronizzazione tra dispositivi (GitHub Gist simulato)');
 (async () => {

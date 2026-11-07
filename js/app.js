@@ -7,7 +7,7 @@
   var esc = U.escapeHtml;
   var state = EC.storage.load();
   var app = document.getElementById('app');
-  var ctx = { screen: 'home', session: null, placement: null, keys: null, aiChip: null };
+  var ctx = { screen: 'home', session: null, placement: null, writing: null, keys: null, aiChip: null };
 
   var TYPE_INSTR = {
     mc: 'Scegli la risposta corretta.',
@@ -53,7 +53,7 @@
     syncTimer = setTimeout(function () { syncNow(); }, ms || 15000);
   }
   function rerenderIfIdle() {
-    if (ctx.session || ctx.placement) return;
+    if (ctx.session || ctx.placement || ctx.writing) return;
     if (document.querySelector('.modal-backdrop')) return;
     go(ctx.screen);
   }
@@ -114,6 +114,10 @@
       ctx.session = null; // i progressi sono già salvati dopo ogni risposta
       hideAiChip();
     }
+    if (ctx.writing) {
+      ctx.writing = null; // la traduzione in corso è salvata in state.activeWriting
+      hideAiChip();
+    }
     return Promise.resolve(true);
   }
 
@@ -157,6 +161,10 @@
 
     h += '<div class="card-grid" style="margin-top:18px">';
     if (state.level) {
+      var aw = state.activeWriting;
+      h += '<button class="card tile" data-action="writing"><span class="tile-icon">✍️</span><h3>' + (aw ? 'Riprendi la traduzione' : 'Traduzione libera') + '</h3>' +
+        '<p class="muted small">' + (aw ? esc('«' + aw.text.title + '»: ' + (aw.results ? 'manca la correzione degli errori.' : 'continua a tradurre.'))
+          : 'Traduci in inglese un breve testo italiano: ' + (EC.ai.enabled(state) ? 'l\'AI corregge ogni frase e spiega gli errori.' : 'confronta con la traduzione modello e impara dagli errori tipici.')) + '</p></button>';
       var st = L.levelUpStatus(state);
       h += '<button class="card tile" data-nav="progress"><span class="tile-icon">🗺️</span><h3>I miei progressi</h3>' +
         '<p class="muted small">' + st.acquired + ' argomenti su ' + st.total + ' acquisiti nel livello ' + esc(st.level) + '</p>' +
@@ -217,6 +225,7 @@
         if (a === 'placement-intro') placementIntro();
         else if (a === 'skip-placement') skipPlacement();
         else if (a === 'start-session') startSession();
+        else if (a === 'writing') startWriting();
         else if (a === 'export') exportBackup();
       });
     });
@@ -542,18 +551,21 @@
     };
   }
 
-  function submitAnswer(item, given, ctrl) {
-    var s = ctx.session;
+  // Risposta scritta non prevista: con l'AI attiva si chiede se è comunque accettabile.
+  // Restituisce una Promise con le opzioni per session.answer ({ forceCorrect, aiNote }).
+  function aiCheck(item, given) {
     var pre = EC.session.evaluate(item, given);
     var typed = item.type !== 'mc' && item.type !== 'order';
-    if (!pre.correct && typed && EC.ai.enabled(state) && !pre.note && given) {
-      UI.$('#fb').innerHTML = '<div class="feedback ok" style="background:var(--surface-2);border-color:var(--border)"><div class="row"><span class="spinner"></span> Controllo la tua risposta…</div></div>';
-      EC.ai.judge(state, item, given).then(function (j) {
-        finalize(j ? { forceCorrect: j.acceptable, aiNote: j.acceptable ? '' : j.explanation } : {});
-      }, function () { finalize({}); });
-    } else {
-      finalize({});
-    }
+    if (pre.correct || !typed || !EC.ai.enabled(state) || pre.note || !given) return Promise.resolve({});
+    UI.$('#fb').innerHTML = '<div class="feedback ok" style="background:var(--surface-2);border-color:var(--border)"><div class="row"><span class="spinner"></span> Controllo la tua risposta…</div></div>';
+    return EC.ai.judge(state, item, given).then(function (j) {
+      return j ? { forceCorrect: j.acceptable, aiNote: j.acceptable ? '' : j.explanation } : {};
+    }, function () { return {}; });
+  }
+
+  function submitAnswer(item, given, ctrl) {
+    var s = ctx.session;
+    aiCheck(item, given).then(finalize);
     function finalize(opts) {
       if (ctx.session !== s) return;
       var ev = s.answer(given, opts);
@@ -566,7 +578,9 @@
     }
   }
 
-  function showFeedback(item, given, ev) {
+  // opts (facoltativo): { onNext, hint } — usato dal rinforzo della traduzione libera
+  function showFeedback(item, given, ev, opts) {
+    opts = opts || {};
     var topic = topicOf(item);
     var fb = UI.$('#fb');
     var h;
@@ -594,12 +608,13 @@
         h += '<div class="retype"><label for="retype">✍️ Riscrivi la risposta giusta per fissarla in memoria:</label>' +
           '<input class="text-input" id="retype" ' + inputAttrs() + ' placeholder="' + esc(ev.expected) + '"></div>';
       }
-      h += '<div class="actions"><span class="hint">Tra poco ti propongo un esercizio simile</span><button class="btn" data-fb="next"' + (typed ? ' disabled' : '') + '>Ho capito, avanti →</button></div></div>';
+      h += '<div class="actions"><span class="hint">' + esc(opts.hint || 'Tra poco ti propongo un esercizio simile') + '</span><button class="btn" data-fb="next"' + (typed ? ' disabled' : '') + '>Ho capito, avanti →</button></div></div>';
     }
     fb.innerHTML = h;
     var nextBtn = UI.$('[data-fb="next"]', fb);
     nextBtn.addEventListener('click', function () {
-      if (ev.done) finishSession(); else showExercise();
+      if (opts.onNext) opts.onNext();
+      else if (ev.done) finishSession(); else showExercise();
     });
     var rt = UI.$('#retype', fb);
     if (rt) {
@@ -680,6 +695,414 @@
   }
   function stat(v, l) { return '<div class="stat"><div class="v">' + v + '</div><div class="l">' + esc(l) + '</div></div>'; }
 
+  /* ================= TRADUZIONE LIBERA ================= */
+  // Lo stato vero è state.activeWriting (salvato e sincronizzato); ctx.writing tiene solo
+  // ciò che serve alla schermata (frasi già riscritte, esercizi di rinforzo scelti).
+  var W = EC.writing;
+
+  function resumeWriting() {
+    var w = state.activeWriting;
+    if (!w.results) return writingWrite();
+    if (w.drill && w.drill.length) return writingDrill(0);
+    return writingReview();
+  }
+
+  function startWriting() {
+    ctx.writing = { retyped: {}, rtText: {}, drillItems: null };
+    var token = ctx.writing;
+    if (state.activeWriting && state.activeWriting.text) return resumeWriting();
+    if (EC.sync.enabled(state)) {
+      render('<div class="card center stack" style="max-width:420px;margin:40px auto"><div class="row" style="justify-content:center"><span class="spinner"></span> Sincronizzo i progressi…</div></div>', 'home');
+      return syncNow({ timeout: 5000 }).then(function () {
+        if (ctx.writing !== token) return;
+        if (state.activeWriting && state.activeWriting.text) return resumeWriting();
+        newText(token);
+      });
+    }
+    newText(token);
+  }
+
+  function newText(token) {
+    function begin(text, source) {
+      if (ctx.writing !== token) return;
+      if (!text) {
+        text = W.pickText(state);
+        source = 'bank';
+        if (!text) {
+          ctx.writing = null;
+          render('<div class="card"><h2>Nessun testo disponibile</h2><p class="muted">Qualcosa non va con la banca dei testi.</p></div>', 'home');
+          return;
+        }
+      }
+      W.start(state, text, source);
+      save();
+      writingWrite();
+    }
+    if (!EC.ai.enabled(state)) return begin(null);
+    render('<div class="card center stack" style="max-width:460px;margin:40px auto"><div class="big-emoji">✨</div>' +
+      '<div class="row" style="justify-content:center"><span class="spinner"></span> L\'AI prepara un testo su misura per te…</div>' +
+      '<p class="small muted">Sceglie gli argomenti su cui ti serve più allenamento.</p></div>', 'home');
+    var avoid = (state.writings || []).slice(-8).map(function (x) { return x.title; });
+    EC.ai.generateText(state, { topics: W.focusTopics(state, 3), avoid: avoid }).then(function (text) {
+      if (!text) UI.toast('L\'AI non ha preparato un testo valido: uso un testo della banca offline.', 3500);
+      begin(text, 'ai');
+    }, function () {
+      UI.toast('AI non disponibile: uso un testo della banca offline.', 3500);
+      begin(null);
+    });
+  }
+
+  function writingHead(w, sub, icon) {
+    return '<div class="session-head"><div class="w-badge" aria-hidden="true">' + (icon || '✍️') + '</div>' +
+      '<div class="meta"><div class="tiny muted">' + esc(sub) + '</div><h2>' + esc(w.text.title) + '</h2>' +
+      '<div class="chips" style="margin-top:6px">' + UI.levelBadge(w.text.level) +
+      (w.source === 'ai' ? '<span class="chip primary">✨ AI</span>' : '<span class="chip">📚 Testo della banca</span>') + '</div></div>' +
+      '<button class="btn ghost" id="w-quit" title="Esci (la traduzione resta salvata)">Esci</button></div>';
+  }
+
+  function bindQuit() {
+    var q = UI.$('#w-quit');
+    if (!q) return;
+    q.addEventListener('click', function () {
+      UI.confirm('Vuoi fermarti qui?', 'La traduzione resta salvata: la ritrovi in Home ("Riprendi la traduzione").', 'Esci').then(function (ok) {
+        if (!ok) return;
+        ctx.writing = null;
+        hideAiChip();
+        home();
+      });
+    });
+  }
+
+  /* ---------- 1. scrittura ---------- */
+  function writingWrite() {
+    var w = state.activeWriting;
+    if (!w) return home();
+    var ss = w.text.sentences;
+    var h = writingHead(w, 'Traduzione libera · ' + ss.length + ' frasi');
+    h += '<div class="card soft w-text"><div class="tiny muted">Il testo completo</div><p lang="it">' + esc(ss.map(function (s) { return s.it; }).join(' ')) + '</p></div>';
+    h += '<div class="card exercise" style="margin-top:14px"><div class="instruction"><span aria-hidden="true">🌍</span>' +
+      '<span>Traduci in inglese, frase per frase. Non serve tradurre parola per parola: conta che la frase sia corretta e dica la stessa cosa.</span></div>';
+    ss.forEach(function (s, i) {
+      h += '<div class="w-sentence"><label for="w-ans-' + i + '"><span class="w-num">' + (i + 1) + '</span><span lang="it">' + esc(s.it) + '</span></label>' +
+        '<textarea class="text-input w-input" id="w-ans-' + i + '" data-wi="' + i + '" rows="2" lang="en" ' + inputAttrs() + ' placeholder="Scrivi la frase in inglese">' + esc(w.answers[i] || '') + '</textarea></div>';
+    });
+    h += '<div class="actions"><span class="hint">' + (EC.ai.enabled(state)
+      ? 'Correzione con l\'AI: frase per frase, con la spiegazione di ogni errore.'
+      : 'Correzione offline: le frasi che non so valutare le confronti tu con la traduzione modello.') + '</span>' +
+      '<button class="btn" id="w-check">Correggi →</button></div></div>';
+    render(h, 'home');
+    bindQuit();
+
+    var inputs = UI.$$('.w-input');
+    var timer = null;
+    function collect() { return inputs.map(function (el) { return el.value.trim(); }); }
+    inputs.forEach(function (el, i) {
+      el.addEventListener('input', function () {
+        if (!state.activeWriting) return;
+        W.setAnswers(state, collect());
+        clearTimeout(timer);
+        timer = setTimeout(save, 600);
+      });
+      el.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          if (inputs[i + 1]) inputs[i + 1].focus(); else UI.$('#w-check').focus();
+        }
+      });
+    });
+    var firstEmpty = inputs.filter(function (el) { return !el.value.trim(); })[0];
+    setTimeout(function () { (firstEmpty || inputs[0]).focus(); }, 30);
+
+    UI.$('#w-check').addEventListener('click', function () {
+      clearTimeout(timer);
+      var answers = collect();
+      W.setAnswers(state, answers);
+      save();
+      var empty = answers.filter(function (a) { return !a; }).length;
+      if (empty === answers.length) {
+        inputs[0].classList.remove('shake'); void inputs[0].offsetWidth; inputs[0].classList.add('shake');
+        inputs[0].focus();
+        UI.toast('Scrivi almeno una frase in inglese.');
+        return;
+      }
+      var go2 = function () { writingCorrect(); };
+      if (!empty) return go2();
+      UI.confirm('Alcune frasi sono vuote', 'Le frasi senza traduzione contano come errori. Vuoi far correggere lo stesso?', 'Correggi').then(function (ok) { if (ok) go2(); });
+    });
+  }
+
+  /* ---------- 2. correzione ---------- */
+  function writingCorrect() {
+    var w = state.activeWriting;
+    var token = ctx.writing;
+    var start = w.start, text = w.text, answers = w.answers.slice();
+    function done(results) {
+      if (ctx.writing !== token || !state.activeWriting || state.activeWriting.start !== start) return;
+      W.setResults(state, results);
+      save();
+      syncSoon(20000);
+      writingReview();
+    }
+    if (!EC.ai.enabled(state)) return done(W.gradeOffline(text, answers));
+    render(writingHead(w, 'Traduzione libera · correzione') +
+      '<div class="card center stack" style="margin-top:14px"><div class="row" style="justify-content:center"><span class="spinner"></span> L\'AI sta correggendo la tua traduzione…</div>' +
+      '<p class="small muted">Controlla ogni frase e prepara la spiegazione degli errori: può volerci fino a un minuto.</p></div>', 'home');
+    bindQuit();
+    EC.ai.correctTranslation(state, text, answers).then(done, function () {
+      UI.toast('Correzione AI non riuscita: uso la correzione offline.', 3500);
+      done(W.gradeOffline(text, answers));
+    });
+  }
+
+  function topicChip(id) {
+    var t = id && EC.data.topicById[id];
+    return t ? ' <span class="chip">' + esc(t.title) + '</span>' : '';
+  }
+
+  function resultCard(i) {
+    var w = state.activeWriting;
+    var r = w.results[i], s = w.text.sentences[i];
+    var itLine = '<div class="w-it-line"><span class="w-num">' + (i + 1) + '</span><span lang="it">' + esc(s.it) + '</span></div>';
+    var h;
+    if (r.status === 'ok') {
+      h = '<div class="feedback ok w-card"><div class="fb-title"><span class="fb-icon">✓</span>' + esc(PRAISE[i % PRAISE.length]) + '</div>' + itLine +
+        '<div class="fb-grid"><div class="fb-line"><span class="lbl">La tua traduzione</span><span class="w-given">' + esc(r.given) + '</span></div>';
+      if (r.model && !M.isMatch(r.model, [r.given])) {
+        h += '<div class="fb-line"><span class="lbl">' + (r.by === 'ai' ? 'Più naturale' : 'Altra versione') + '</span><span>' + esc(r.model) + '</span></div>';
+      }
+      h += '</div>';
+      if (r.comment) h += '<p class="small" style="margin-top:8px">' + esc(r.comment) + '</p>';
+      h += '<details class="rule-box"><summary>💡 Il punto chiave della frase</summary><div class="rule-body">' + esc(s.explanation) + '</div></details></div>';
+      return h;
+    }
+    if (r.status === 'check') {
+      h = '<div class="feedback w-card w-check"><div class="fb-title"><span class="fb-icon">?</span>Confronta con la traduzione modello</div>' + itLine +
+        '<div class="fb-grid"><div class="fb-line"><span class="lbl">La tua traduzione</span><span class="w-given">' + esc(r.given) + '</span></div>' +
+        '<div class="fb-line"><span class="lbl">Modello</span><span class="right">' + esc(r.model) + '</span></div></div>';
+      var alt = (s.en || []).slice(1, 4);
+      if (alt.length) h += '<p class="small muted" style="margin-top:8px">Vanno bene anche: ' + alt.map(esc).join(' · ') + '</p>';
+      if (r.nearMiss) h += '<p class="small" style="margin-top:8px">✏️ È quasi uguale al modello: controlla l\'ortografia lettera per lettera.</p>';
+      h += '<div class="why"><div class="why-title">💡 Il punto chiave</div><p>' + esc(s.explanation) + '</p>';
+      if (s.tips && s.tips.length) {
+        h += '<p class="small" style="margin-top:10px"><b>Errori tipici da controllare:</b></p><ul class="w-errs">' + s.tips.map(function (t) {
+          return '<li><span class="w-wrong">' + esc(t.wrong) + '</span> → <span class="w-right">' + esc(t.right) + '</span><div class="small">' + esc(t.why) + '</div></li>';
+        }).join('') + '</ul>';
+      }
+      h += '</div><div class="actions"><span class="hint">La tua frase è corretta e dice la stessa cosa?</span>' +
+        '<button class="btn secondary" data-wself="' + i + '" data-v="0">✗ Avevo sbagliato</button><button class="btn ok" data-wself="' + i + '" data-v="1">✓ Era giusta</button></div></div>';
+      return h;
+    }
+    // sbagliata
+    h = '<div class="feedback bad w-card"><div class="fb-title"><span class="fb-icon">✗</span>Non ancora… vediamo perché</div>' + itLine +
+      '<div class="fb-grid"><div class="fb-line"><span class="lbl">La tua traduzione</span><span class="yours">' + (r.given ? esc(r.given) : '(nessuna)') + '</span></div>' +
+      '<div class="fb-line"><span class="lbl">Corretta</span><span class="right">' + esc(r.corrected) + '</span></div>';
+    if (r.model && !M.isMatch(r.model, [r.corrected])) {
+      h += '<div class="fb-line"><span class="lbl">' + (r.by === 'ai' ? 'Più naturale' : 'Modello') + '</span><span>' + esc(r.model) + '</span></div>';
+    }
+    h += '</div><div class="why"><div class="why-title">💡 Perché</div>';
+    if (r.errors.length) {
+      h += '<ul class="w-errs">' + r.errors.map(function (e) {
+        return '<li>' + (e.wrong ? '<span class="w-wrong">' + esc(e.wrong) + '</span> → ' : '') + '<span class="w-right">' + esc(e.right) + '</span>' + topicChip(e.topic) +
+          '<div>' + esc(e.why) + '</div></li>';
+      }).join('') + '</ul>';
+    }
+    if (r.comment) h += '<p style="margin-top:8px"><b>' + esc(r.comment) + '</b></p>';
+    h += '<p class="small muted" style="margin-top:8px">' + esc(s.explanation) + '</p></div>';
+    var tids = U.uniq(r.errors.map(function (e) { return e.topic; }).filter(function (id) { return id && EC.data.topicById[id]; }));
+    if (!tids.length) tids = (s.topics || []).filter(function (id) { return EC.data.topicById[id]; });
+    tids.slice(0, 3).forEach(function (id) {
+      var t = EC.data.topicById[id];
+      h += '<details class="rule-box"><summary>📘 Ripassa la regola: ' + esc(t.title) + '</summary><div class="rule-body">' + UI.ruleHtml(t) + '</div></details>';
+    });
+    var done = ctx.writing.retyped[i];
+    h += '<div class="retype"><label for="w-rt-' + i + '">✍️ Riscrivi la frase corretta per fissarla in memoria:</label>' +
+      '<input class="text-input" id="w-rt-' + i + '" data-wrt="' + i + '" lang="en" ' + inputAttrs() + ' placeholder="' + esc(r.corrected) + '" value="' + esc(ctx.writing.rtText[i] || '') + '"' +
+      (done ? ' style="border-color:var(--ok)"' : '') + '></div></div>';
+    return h;
+  }
+
+  function writingReview() {
+    var w = state.activeWriting;
+    if (!w) return home();
+    if (!w.results) return writingWrite();
+    var res = w.results;
+    var nOk = res.filter(function (r) { return r.status === 'ok'; }).length;
+    var nCheck = res.filter(function (r) { return r.status === 'check'; }).length;
+    var h = writingHead(w, 'Traduzione libera · correzione');
+    h += '<div class="card w-score"><div class="row-between"><div><h2>' + nOk + (nOk === 1 ? ' frase giusta' : ' frasi giuste') + ' su ' + res.length + '</h2>' +
+      '<p class="muted small" style="margin-top:4px">' + (nOk === res.length ? 'Perfetto! Leggi lo stesso le versioni alternative: arricchiscono il vocabolario.'
+        : 'Leggi le correzioni e riscrivi ogni frase sbagliata.' + (nCheck ? ' Per ' + nCheck + (nCheck === 1 ? ' frase' : ' frasi') + ' confronta tu con la traduzione modello.' : '')) +
+      '</p></div><span class="chip">' + (res.some(function (r) { return r.by === 'ai'; }) ? '✨ Corretta dall\'AI' : '📚 Correzione offline') + '</span></div></div>';
+    res.forEach(function (r, i) { h += '<div id="w-res-' + i + '">' + resultCard(i) + '</div>'; });
+    h += '<div class="actions"><span class="hint" id="w-hint"></span><button class="btn" id="w-next">Continua →</button></div>';
+    render(h, 'home');
+    bindQuit();
+    var screen = UI.$('.screen', app);
+    var next = UI.$('#w-next');
+
+    function pending() {
+      var cur = state.activeWriting;
+      var p = { check: 0, retype: 0 };
+      (cur ? cur.results : []).forEach(function (r, i) {
+        if (r.status === 'check') p.check++;
+        else if (r.status === 'wrong' && !ctx.writing.retyped[i]) p.retype++;
+      });
+      return p;
+    }
+    function update() {
+      var p = pending();
+      var busy = p.check + p.retype;
+      next.disabled = busy > 0;
+      var hint = [];
+      if (p.check) hint.push(p.check + (p.check === 1 ? ' frase da confrontare' : ' frasi da confrontare'));
+      if (p.retype) hint.push(p.retype + (p.retype === 1 ? ' frase da riscrivere' : ' frasi da riscrivere'));
+      var drill = state.activeWriting ? W.drillTopics(state.activeWriting).length : 0;
+      UI.$('#w-hint').textContent = busy ? 'Mancano: ' + hint.join(', ') : drill ? 'Poi ' + (drill === 1 ? 'un esercizio' : drill + ' esercizi') + ' di rinforzo sulle regole sbagliate' : 'Poi vedi il riepilogo';
+      return busy;
+    }
+    function focusNext() {
+      var cur = state.activeWriting;
+      for (var i = 0; i < cur.results.length; i++) {
+        var r = cur.results[i];
+        if (r.status === 'wrong' && !ctx.writing.retyped[i]) { var el = UI.$('#w-rt-' + i); if (el) { el.focus(); return; } }
+        if (r.status === 'check') { var c = UI.$('#w-res-' + i); if (c) { c.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; } }
+      }
+      next.focus();
+    }
+
+    screen.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-wself]');
+      if (!b || !state.activeWriting) return;
+      var i = +b.getAttribute('data-wself');
+      W.resolveCheck(state.activeWriting.results[i], b.getAttribute('data-v') === '1');
+      save();
+      UI.$('#w-res-' + i).innerHTML = resultCard(i);
+      update();
+      var rt = UI.$('#w-rt-' + i);
+      if (rt) rt.focus(); else focusNext();
+    });
+    screen.addEventListener('input', function (e) {
+      var el = e.target.closest('[data-wrt]');
+      if (!el || !state.activeWriting) return;
+      var i = +el.getAttribute('data-wrt');
+      var okk = W.retypeOk(state.activeWriting.results[i], state.activeWriting.text.sentences[i], el.value);
+      ctx.writing.retyped[i] = okk;
+      ctx.writing.rtText[i] = el.value;
+      el.style.borderColor = okk ? 'var(--ok)' : '';
+      update();
+    });
+    screen.addEventListener('keydown', function (e) {
+      var el = e.target.closest('[data-wrt]');
+      if (!el || e.key !== 'Enter') return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (ctx.writing.retyped[+el.getAttribute('data-wrt')]) focusNext();
+      else { el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake'); }
+    });
+    next.addEventListener('click', function () {
+      if (update()) return;
+      if (state.activeWriting && W.drillTopics(state.activeWriting).length) writingDrill(0);
+      else writingFinish();
+    });
+    ctx.keys = function (e) {
+      if (e.key === 'Enter' && !next.disabled && !/INPUT|TEXTAREA|BUTTON|SUMMARY/.test((document.activeElement || {}).tagName || '')) { e.preventDefault(); next.click(); }
+    };
+    update();
+    setTimeout(focusNext, 60);
+  }
+
+  /* ---------- 3. rinforzo: un esercizio sulla stessa regola, come la variante della sessione ---------- */
+  function writingDrill(k) {
+    var w = state.activeWriting;
+    if (!w) return home();
+    if (!ctx.writing.drillItems) {
+      var doneTopics = (w.drill || []).map(function (d) { return d.topic; });
+      var exclude = {};
+      ctx.writing.drillItems = W.drillTopics(w).filter(function (t) { return doneTopics.indexOf(t) === -1; }).map(function (t) {
+        var it = W.drillItem(state, t, null, exclude);
+        if (it) exclude[it.id] = true;
+        return it;
+      }).filter(Boolean);
+    }
+    var items = ctx.writing.drillItems;
+    if (k >= items.length) return writingFinish();
+    var item = items[k];
+    var topic = topicOf(item);
+    var h = writingHead(w, 'Rinforzo ' + (k + 1) + ' di ' + items.length + ' · stessa regola dell\'errore', '🔁') +
+      '<div class="banner info" style="margin-bottom:14px">🔁 <div>Nella traduzione hai sbagliato <b>' + esc(topic.title) + '</b>: proviamo subito un esercizio sulla stessa regola.</div></div>' +
+      '<div class="card exercise" id="ex"></div><div id="fb"></div>';
+    render(h, 'home');
+    bindQuit();
+    var token = ctx.writing;
+    var ctrl = mountExercise(UI.$('#ex'), item, 'session', function (given) {
+      aiCheck(item, given).then(function (opts) {
+        if (ctx.writing !== token || !state.activeWriting) return;
+        var ev = EC.session.evaluate(item, given);
+        if (!ev.correct && opts.forceCorrect) { ev.correct = true; ev.acceptedByAi = true; }
+        if (opts.aiNote) ev.aiNote = opts.aiNote;
+        ev.done = false;
+        W.recordDrill(state, item, ev.correct);
+        save();
+        if (item.type === 'mc') ctrl.markMc(given, item.answers[0]);
+        showFeedback(item, given, ev, {
+          onNext: function () { writingDrill(k + 1); },
+          hint: k + 1 < items.length ? 'Ancora un esercizio di rinforzo' : 'Poi vedi il riepilogo della traduzione'
+        });
+      });
+    });
+    ctx.keys = function (e) {
+      var fbBtn = UI.$('#fb [data-fb="next"]');
+      if (fbBtn) {
+        if (e.key === 'Enter' && !fbBtn.disabled && !/INPUT|TEXTAREA/.test((document.activeElement || {}).tagName || '')) { e.preventDefault(); fbBtn.click(); }
+        return;
+      }
+      ctrl.keys(e);
+    };
+  }
+
+  /* ---------- 4. riepilogo ---------- */
+  function writingFinish() {
+    var sum = W.finish(state);
+    ctx.writing = null;
+    if (!sum) return home();
+    if (EC.report.enabled(state)) EC.report.enqueueWriting(state, sum, { device: deviceInfo().label });
+    save();
+    flushReports();
+    clearTimeout(syncTimer);
+    syncNow();
+    var all = sum.correct === sum.total;
+    var drillOk = sum.drill.filter(function (d) { return d.correct; }).length;
+    var h = '<div class="card celebrate stack"><div class="big-emoji">' + (all ? '🏆' : sum.correct * 2 >= sum.total ? '🎉' : '💪') + '</div>' +
+      '<h1>' + (all ? 'Traduzione perfetta!' : 'Traduzione completata!') + '</h1>' +
+      '<p class="muted">«' + esc(sum.title) + '»: ' + sum.correct + ' frasi corrette su ' + sum.total + (sum.drill.length ? ' · rinforzo ' + drillOk + '/' + sum.drill.length : '') + ' (' + sum.minutes + ' min).</p></div>';
+    h += '<div class="stats" style="margin-top:16px">' + stat(sum.correct + '/' + sum.total, 'frasi giuste') + stat(sum.errors.length, 'frasi corrette insieme') +
+      stat('🔥 ' + state.streak.count, state.streak.count === 1 ? 'giorno di allenamento' : 'giorni di fila') + stat(esc(state.level), 'livello attuale') + '</div>';
+    var up = [], down = [];
+    sum.boxChanges.forEach(function (c) {
+      var t = EC.data.topicById[c.topic];
+      if (!t) return;
+      if (c.to > c.from) up.push(t); else if (c.to < c.from || sum.perTopic[c.topic].wrong) down.push(t);
+    });
+    if (up.length || down.length) {
+      h += '<div class="card" style="margin-top:16px">';
+      if (up.length) h += '<h3>⬆️ Stai migliorando in</h3><div class="chips" style="margin-top:8px">' + U.uniq(up).map(function (t) { return '<span class="chip ok">' + esc(t.title) + '</span>'; }).join('') + '</div>';
+      if (down.length) h += '<h3 style="margin-top:' + (up.length ? 16 : 0) + 'px">🔁 Da ripassare domani</h3><div class="chips" style="margin-top:8px">' + U.uniq(down).map(function (t) { return '<span class="chip warn">' + esc(t.title) + '</span>'; }).join('') + '</div>';
+      h += '</div>';
+    }
+    if (sum.errors.length) {
+      h += '<div class="card" style="margin-top:16px"><h3>📝 Le frasi da ricordare</h3><ul class="err-list" style="margin-top:12px">' + sum.errors.map(writingErrLi).join('') + '</ul></div>';
+    }
+    h += '<div class="actions"><button class="btn secondary" data-nav="home">Torna alla home</button><button class="btn" data-action="writing">Un\'altra traduzione</button></div>';
+    render(h, 'home');
+    bindActions();
+    UI.confetti(all ? 120 : 60);
+  }
+
+  function writingErrLi(e) {
+    return '<li><div class="p" lang="it">' + esc(e.it) + '</div>' +
+      '<div class="small" style="margin-top:4px"><span class="g">' + (e.given ? esc(e.given) : '(nessuna)') + '</span> → <span class="c">' + esc(e.corrected) + '</span></div></li>';
+  }
+
 
   /* ================= GUIDA ================= */
   function deviceInfo() {
@@ -717,7 +1140,8 @@
         '<b>Ogni giorno:</b> premi <b>"Inizia l\'allenamento"</b>. La sessione finisce quando arrivi a <b>10 risposte corrette</b> (l\'anello verde in alto si riempie).',
         '<b>Se sbagli:</b> leggi il "Perché", riscrivi la risposta giusta e vai avanti. Poco dopo arriva un esercizio simile sulla stessa regola: è il momento di dimostrare che l\'hai capita.',
         '<b>La difficoltà sale da sola:</b> ogni argomento ha 3 gradini (scegliere → completare → scrivere da solo) e il livello passa da A1 ad A2, B1 e B1+ quando sei pronto. Lo vedi in <b>Progressi</b>.',
-        '<b>Puoi fermarti quando vuoi</b> con "Esci": la sessione resta salvata e riparte da dove eri.'
+        '<b>Puoi fermarti quando vuoi</b> con "Esci": la sessione resta salvata e riparte da dove eri.',
+        '<b>Traduzione libera</b> (riquadro ✍️ in Home): ti propongo un breve testo in italiano e lo traduci in inglese frase per frase. Poi ogni frase viene corretta: per ogni errore vedi la tua versione, quella giusta e il perché. Riscrivi le frasi sbagliate e fai 1–2 esercizi di rinforzo sulle regole che hai sbagliato.'
       ]) +
       '<div class="banner info">💡 <div><b>Il trucco:</b> una sessione al giorno funziona molto meglio di tre sessioni in un giorno solo. Gli argomenti tornano a distanza di giorni apposta: è così che si fissano nella memoria.</div></div>' +
       '<p class="small muted">Sul computer puoi usare la tastiera: <kbd>1</kbd>–<kbd>4</kbd> per scegliere una risposta, <kbd>Invio</kbd> per controllare e andare avanti.</p>');
@@ -762,7 +1186,7 @@
       '<p>Sincronizza all\'apertura, prima e dopo ogni sessione, durante gli esercizi, quando chiudi la pagina e quando torna internet. L\'icona in alto mostra lo stato: <span class="sync-chip sync-ok" style="cursor:default">☁️✓</span> sincronizzato, <span class="sync-chip sync-offline" style="cursor:default">☁️ offline</span> senza rete (sincronizzerà appena torna), <span class="sync-chip sync-error" style="cursor:default">☁️⚠️</span> problema (tocca l\'icona per i dettagli).</p>');
 
     h += sec('email', '📧 Resoconto via email',
-      '<p>Puoi ricevere un\'email ogni volta che una sessione viene completata, con risultato, errori e progressi.</p>' + steps([
+      '<p>Puoi ricevere un\'email ogni volta che una sessione o una traduzione libera viene completata, con risultato, errori e progressi.</p>' + steps([
         'In <b>Genitori → Resoconto via email</b> attiva "Invia il resoconto", scrivi l\'indirizzo e premi <b>Salva</b>.',
         'Premi <b>Invia email di prova</b>. La prima volta arriva un\'email di <b>attivazione</b> da FormSubmit: aprila e premi <b>Activate Form</b> (una volta sola).',
         'Fatto: da ora il resoconto parte da solo a fine sessione, da qualunque dispositivo collegato. Se non c\'è connessione resta in attesa e parte appena possibile.'
@@ -775,7 +1199,7 @@
       ]) + '<p class="small muted">L\'app ricorda di fare il backup dopo 14 giorni. In una finestra di navigazione privata i progressi non vengono salvati.</p>');
 
     h += sec('ai', '✨ AI facoltativa (Claude)',
-      '<p>Non serve per usare l\'app. Se la attivi, crea esercizi nuovi sugli argomenti più deboli e controlla le risposte scritte non previste, con una spiegazione su misura.</p>' + steps([
+      '<p>Non serve per usare l\'app. Se la attivi, crea esercizi nuovi sugli argomenti più deboli, controlla le risposte scritte non previste e, nella <b>traduzione libera</b>, crea testi su misura e corregge ogni frase spiegando gli errori.</p>' + steps([
         'Crea una chiave API su <a href="https://console.anthropic.com/" target="_blank" rel="noopener">console.anthropic.com</a> e imposta un <b>limite di spesa mensile</b>.',
         'In <b>Genitori → AI facoltativa</b> incolla la chiave, attiva "Usa l\'AI", scegli il modello e premi <b>Prova la chiave</b>.'
       ]) + '<p class="small muted">La chiave resta solo nel browser di quel dispositivo (va inserita su ognuno) e non viene sincronizzata né salvata nei backup. Senza chiave o senza internet l\'app usa gli esercizi offline.</p>');
@@ -786,6 +1210,7 @@
       faq('Compare ☁️⚠️ "token non valido o scaduto". Che faccio?', 'Crea un nuovo token (stessi passaggi). Su un dispositivo: <b>Genitori → Disattiva su questo dispositivo</b>, incolla il nuovo token e attiva; poi ricollega gli altri con il nuovo link/QR. I progressi restano.') +
       faq('Se usa due dispositivi senza internet, cosa succede?', 'Quando tornano online i progressi vengono <b>uniti</b>: nessuna sessione si perde e vale il livello più alto raggiunto.') +
       faq('Chi può vedere i progressi?', 'Sono in un Gist <b>segreto</b> del tuo account GitHub: non è elencato pubblicamente, ma chi conosce il suo link (o il link di collegamento) può leggerlo. Contiene solo il nome e i risultati degli esercizi. Il link di collegamento mandalo solo ai tuoi dispositivi.') +
+      faq('Come funziona la traduzione libera senza AI?', 'Usa i testi già pronti dell\'app. Se la tua frase coincide con una traduzione prevista è giusta; se contiene un errore tipico conosciuto (per esempio <i>I have fourteen years</i>) te lo spiega; altrimenti ti mostra la traduzione modello con gli errori tipici da controllare e decidi tu se la tua era giusta. Con l\'AI attiva, invece, il testo è creato su misura sugli argomenti più deboli e la correzione è fatta frase per frase dall\'AI.') +
       faq('Perché una sessione dura più di 10 esercizi?', 'Perché finisce con 10 risposte <b>corrette</b>: ogni errore aggiunge un esercizio (con spiegazione e variante). È voluto: si impara proprio lì.') +
       faq('Il livello sembra troppo facile o troppo difficile.', 'Rifai il <b>test di livello</b> (Home → Rifai il test): non cancella i progressi, può alzare il livello e segnala gli argomenti da ripassare. Comunque il sistema si adatta da solo sessione dopo sessione.') +
       faq('Non ricevo le email dei resoconti.', 'Controlla lo spam e che l\'attivazione FormSubmit sia stata confermata (Genitori → Invia email di prova). Se il servizio è momentaneamente irraggiungibile i resoconti restano in attesa e partono da soli più tardi (fino a 7 giorni).') +
@@ -886,6 +1311,23 @@
     }
     h += '</div>';
 
+    // traduzioni libere
+    var wr = state.writings || [];
+    h += '<div class="card" style="margin-top:16px"><h2>✍️ Traduzioni libere</h2>';
+    if (state.activeWriting) h += '<p class="small muted" style="margin-top:6px">In corso: «' + esc(state.activeWriting.text.title) + '».</p>';
+    if (!wr.length) h += '<p class="muted" style="margin-top:8px">Ancora nessuna traduzione libera completata. Si avvia dalla Home (riquadro "Traduzione libera").</p>';
+    else {
+      h += '<div class="table-wrap" style="margin-top:10px"><table><thead><tr><th>Data</th><th>Testo</th><th>Livello</th><th>Frasi giuste</th><th>Correzione</th><th>Minuti</th></tr></thead><tbody>' +
+        wr.slice(-10).reverse().map(function (x) {
+          return '<tr><td>' + UI.fmtDay(x.date) + '</td><td>' + esc(x.title) + '</td><td>' + esc(x.level) + '</td><td>' + x.correct + '/' + x.total + '</td><td>' +
+            (x.source === 'ai' ? 'AI' : 'offline') + '</td><td>' + x.minutes + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+      var werrs = [];
+      wr.slice().reverse().forEach(function (x) { (x.errors || []).slice().reverse().forEach(function (e) { if (werrs.length < 8) werrs.push(e); }); });
+      if (werrs.length) h += '<h3 style="margin-top:16px">Frasi sbagliate di recente</h3><ul class="err-list" style="margin-top:10px">' + werrs.map(writingErrLi).join('') + '</ul>';
+    }
+    h += '</div>';
+
     // argomenti difficili
     var hard = Object.keys(state.topics).map(function (id) { return { id: id, t: state.topics[id], topic: EC.data.topicById[id] }; })
       .filter(function (x) { return x.topic && x.t.wrong >= 2; })
@@ -926,7 +1368,7 @@
     // AI
     var s = state.settings;
     h += '<div class="card stack" style="margin-top:16px"><h2>✨ AI facoltativa (Claude)</h2>' +
-      '<p class="muted">Con una chiave API di Anthropic l\'app crea esercizi nuovi sugli argomenti deboli e controlla le risposte scritte non previste. Senza chiave tutto funziona lo stesso, offline.</p>' +
+      '<p class="muted">Con una chiave API di Anthropic l\'app crea esercizi nuovi sugli argomenti deboli, controlla le risposte scritte non previste e corregge le traduzioni libere frase per frase. Senza chiave tutto funziona lo stesso, offline (la traduzione libera usa testi già pronti e l\'autovalutazione).</p>' +
       '<label class="switch"><input type="checkbox" id="ai-on"' + (s.aiEnabled ? ' checked' : '') + '> Usa l\'AI</label>' +
       '<div class="field"><label for="ai-key">Chiave API</label><input class="text-input" id="ai-key" type="password" autocomplete="off" placeholder="sk-ant-..." value="' + esc(s.apiKey) + '"></div>' +
       '<div class="field"><label for="ai-model">Modello</label><select class="text-input" id="ai-model">' +
@@ -1171,7 +1613,7 @@
     var inf = state.settings.mailInfo || {};
     var q = EC.report.queue(state).length;
     var h = '<div class="card stack" style="margin-top:16px"><h2>📧 Resoconto via email</h2>' +
-      '<p class="muted">Ogni volta che ' + esc(state.profile.name || 'lo studente') + ' completa una sessione ricevi un\'email con risultato, argomenti migliorati, errori fatti e progressi verso il livello successivo.</p>' +
+      '<p class="muted">Ogni volta che ' + esc(state.profile.name || 'lo studente') + ' completa una sessione o una traduzione libera ricevi un\'email con risultato, argomenti migliorati, errori fatti e progressi verso il livello successivo.</p>' +
       '<label class="switch"><input type="checkbox" id="mail-on"' + (r.enabled ? ' checked' : '') + '> Invia il resoconto</label>' +
       '<div class="field"><label for="mail-to">Indirizzo email</label><input class="text-input" id="mail-to" type="email" autocomplete="email" placeholder="nome@esempio.it" value="' + esc(r.email || '') + '"></div>' +
       '<div class="row"><button class="btn" data-p="mail-save">Salva</button><button class="btn secondary" data-p="mail-test">Invia email di prova</button><span id="mail-status" class="small muted"></span></div>';

@@ -108,6 +108,27 @@ EC.addPassages([
 ```
 `difficulty` per domanda: 1 = informazione esplicita, 2 = sinonimi/parafrasi, 3 = inferenza.
 
+## Testi per la traduzione libera (`data/writing.js`)
+```js
+EC.addTexts([
+  { id: 'w_a1_presento', level: 'A1', title: 'Mi presento',
+    sentences: [
+      { it: 'Mi chiamo Luca e ho quattordici anni.',
+        en: ['My name is Luca and I am fourteen.', 'I am called Luca and I am fourteen years old.'],
+        topics: ['be'],
+        explanation: 'L\'età in inglese si dice con il verbo to be…',
+        tips: [
+          { wrong: 'i have fourteen', right: 'I am fourteen', why: 'L\'età si dice con to be…', topic: 'be' }
+        ] }
+    ] }
+], 'data/writing.js');
+```
+- `id` inizia con `w_`; almeno 3 frasi (meglio 4); `level` tra `EC.LEVELS`.
+- `en`: tutte le traduzioni ragionevoli (la prima è il modello mostrato). Le contrazioni sono già equivalenti; con il genitivo sassone e i nomi propri servono le varianti scritte.
+- `topics`: gli argomenti che la frase allena (decidono quali scatole Leitner si muovono). Meglio di livello ≤ a quello del testo.
+- `tips`: errori tipici degli italiani. `wrong` è un **frammento** (parole intere, minuscolo) cercato dentro la traduzione dello studente: se compare, la frase è sbagliata e si mostra `why`. Non deve comparire in nessuna risposta di `en` (lo controlla `tests/validate.js`). `topic` facoltativo (altrimenti il primo di `topics`).
+- I testi creati dall'AI hanno lo stesso formato (`EC.writing.sanitizeText` li valida).
+
 ## Regole di qualità
 - Inglese britannico standard, frasi naturali, contesti adatti a un ragazzo di 14–15 anni (scuola, sport, amici, famiglia, videogiochi, musica, viaggi). Nessun contenuto inappropriato.
 - Una sola risposta corretta per gli `mc` (controlla che i distrattori siano davvero sbagliati in quel contesto).

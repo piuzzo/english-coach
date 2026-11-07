@@ -470,3 +470,21 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
   .topbar-level .level-badge { display: none; }
   .nav-btn { padding: 7px 7px; font-size: .82rem; }
 }
+
+/* ---------- traduzione libera ---------- */
+.w-badge { display: grid; place-items: center; width: 64px; height: 64px; flex: none; border-radius: 50%; background: var(--primary-soft); font-size: 1.7rem; }
+.w-text p { margin-top: 6px; font-size: 1.05rem; line-height: 1.65; }
+.w-sentence + .w-sentence { margin-top: 18px; }
+.w-sentence label { display: flex; gap: 10px; align-items: baseline; margin-bottom: 8px; font-family: var(--font); font-weight: 700; font-size: 1.12rem; color: var(--primary); }
+.w-num { display: inline-grid; place-items: center; flex: none; width: 26px; height: 26px; border-radius: 8px; background: var(--primary-soft); color: var(--primary); font-size: .85rem; font-weight: 800; }
+textarea.w-input { min-height: 64px; }
+.w-score { margin-top: 2px; }
+.w-it-line { display: flex; gap: 10px; align-items: baseline; margin-top: 12px; font-weight: 700; color: var(--primary); }
+.w-given { font-weight: 700; }
+.feedback.w-check { background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 55%, transparent); }
+.feedback.w-check .fb-title { color: var(--warn); }
+.feedback.w-check .fb-icon { background: var(--warn); }
+.w-errs { margin: 6px 0 0; padding-left: 18px; }
+.w-errs li + li { margin-top: 8px; }
+.w-wrong { text-decoration: line-through; text-decoration-color: var(--bad); font-weight: 700; color: var(--text-2); }
+.w-right { color: var(--ok); font-weight: 800; }

@@ -40,6 +40,8 @@ Nelle risposte scritte deve **riscrivere la forma giusta**. È un piccolo atto d
 - 2–3 esercizi dopo un errore arriva una **variante sulla stessa micro-regola**: stesso "gruppo", frase diversa.
 - Se gli errori sullo stesso argomento si ripetono, il sistema abbassa la difficoltà di un gradino e poi passa alla scelta multipla. Questo "aiuto temporaneo" evita la frustrazione.
 
+**Traduzione libera.** La stessa sequenza vale quando lo studente traduce un testo intero: ogni errore viene spiegato (frammento sbagliato → forma giusta → perché), la frase va riscritta corretta, e subito dopo arriva un esercizio sulla stessa regola. Tradurre frasi complete in un contesto coerente è produzione autonoma: obbliga a scegliere da soli tempo verbale, ordine delle parole e lessico, cioè proprio dove l'interferenza dell'italiano si vede di più.
+
 ## 5. Errori tipici di chi parla italiano (interferenza della lingua madre)
 
 **Cosa dice la ricerca.** Negli studenti italiani l'influenza della lingua madre è una causa di errore importante, spesso più dell'applicazione incompleta delle regole (Aliyar 2020). Gli errori si concentrano su articoli, tempi verbali, numero dei nomi ed espressioni fisse (tesi Unibo; Martelli 2006 sulle collocazioni).

@@ -106,14 +106,42 @@ function validate(opts) {
     if (placementOk < 2) E(t.id, 'servono almeno 2 item mc/gap di difficoltà 1–2 per il test iniziale');
   });
 
-  return { EC, errors, warnings, coverage, count: items.length };
+  // Testi della traduzione libera (data/writing.js)
+  const contains = (given, phrase) => M.forms(given).some((g) => M.forms(phrase).some((p) => p && (' ' + g + ' ').includes(' ' + p + ' ')));
+  EC.data.texts.forEach((t) => {
+    const id = t.id;
+    if (!/^w_[a-z0-9_]+$/.test(id)) E(id, 'id del testo deve iniziare con w_ e contenere solo a-z, 0-9, _');
+    if (!EC.LEVELS.includes(t.level)) E(id, `livello non valido "${t.level}"`);
+    if (!t.title) E(id, 'title mancante');
+    if (!Array.isArray(t.sentences) || t.sentences.length < 3) { E(id, 'servono almeno 3 frasi'); return; }
+    t.sentences.forEach((s, i) => {
+      const sid = id + '#' + (i + 1);
+      if (!s.it) E(sid, 'frase italiana (it) mancante');
+      if (!Array.isArray(s.en) || !s.en.length || s.en.some((a) => typeof a !== 'string' || !a.trim())) E(sid, 'en deve essere un array di traduzioni non vuote');
+      if (!Array.isArray(s.topics) || !s.topics.length) E(sid, 'topics mancante');
+      (s.topics || []).forEach((tp) => {
+        const top = EC.data.topicById[tp];
+        if (!top) E(sid, `argomento sconosciuto "${tp}"`);
+        else if (EC.LEVELS.indexOf(top.level) > EC.LEVELS.indexOf(t.level)) W(sid, `argomento "${tp}" di livello superiore al testo`);
+      });
+      if (!s.explanation || s.explanation.length < 20) E(sid, 'explanation mancante o troppo corta');
+      if (!Array.isArray(s.tips) || !s.tips.length) W(sid, 'nessun errore tipico (tips)');
+      (s.tips || []).forEach((tip) => {
+        if (!tip.wrong || !tip.right || !tip.why) E(sid, 'tip incompleto (servono wrong, right, why)');
+        if (tip.topic && !EC.data.topicById[tip.topic]) E(sid, `tip con argomento sconosciuto "${tip.topic}"`);
+        (s.en || []).forEach((a) => { if (contains(a, tip.wrong)) E(sid, `l'errore tipico "${tip.wrong}" compare nella traduzione corretta "${a}"`); });
+      });
+    });
+  });
+
+  return { EC, errors, warnings, coverage, count: items.length, texts: EC.data.texts.length };
 }
 
 if (require.main === module) {
   const args = process.argv.slice(2);
   const res = validate(args.length ? { only: args } : {});
   console.table(res.coverage);
-  console.log(`Item validati: ${res.count}`);
+  console.log(`Item validati: ${res.count}` + (res.texts ? ` · testi di traduzione libera: ${res.texts}` : ''));
   if (res.warnings.length) {
     console.log(`\nAvvisi (${res.warnings.length}):`);
     res.warnings.slice(0, 60).forEach((w) => console.log('  ' + w));

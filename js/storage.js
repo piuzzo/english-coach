@@ -53,6 +53,8 @@ EC.storage = (function () {
       items: {}, // id → { n, last, wrong }
       sessions: [], // riepiloghi delle sessioni concluse
       activeSession: null, // sessione in corso (per riprenderla se si chiude la pagina)
+      writings: [], // traduzioni libere concluse (vedi js/writing.js)
+      activeWriting: null, // traduzione libera in corso
       streak: { last: null, count: 0, best: 0 },
       lastBackupAt: null,
       resetAt: null // data dell'ultimo azzeramento (serve alla sincronizzazione tra dispositivi)
@@ -71,6 +73,7 @@ EC.storage = (function () {
     st.reports = Object.assign({}, d.reports, st.reports || {});
     st.profile = Object.assign({}, d.profile, st.profile || {});
     st.streak = Object.assign({}, d.streak, st.streak || {});
+    if (!Array.isArray(st.writings)) st.writings = [];
     st.schema = SCHEMA;
     return st;
   }
@@ -98,6 +101,7 @@ EC.storage = (function () {
       ids.slice(0, ids.length - 3000).forEach(function (id) { delete st.items[id]; });
     }
     if (st.sessions.length > 400) st.sessions = st.sessions.slice(-400);
+    if (st.writings && st.writings.length > 200) st.writings = st.writings.slice(-200);
   }
 
   function save(st) {

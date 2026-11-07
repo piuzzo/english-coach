@@ -15,7 +15,26 @@ var EC = (function (g) {
     items: [],
     itemById: {},
     passages: {},
+    texts: [], // testi italiani da tradurre (traduzione libera), vedi data/writing.js
+    textById: {},
     problems: [] // errori di caricamento (id duplicati, ecc.)
+  };
+
+  /* Testi per la traduzione libera: { id, level, title, sentences: [{ it, en: [...], topics: [...], explanation, tips }] } */
+  EC.addTexts = function (list, source) {
+    list.forEach(function (t) {
+      if (!t || !t.id) {
+        EC.data.problems.push('Testo senza id in ' + (source || '?'));
+        return;
+      }
+      if (EC.data.textById[t.id]) {
+        EC.data.problems.push('Testo duplicato: ' + t.id);
+        return;
+      }
+      if (source) t._source = source;
+      EC.data.texts.push(t);
+      EC.data.textById[t.id] = t;
+    });
   };
 
   EC.addTopics = function (list) {

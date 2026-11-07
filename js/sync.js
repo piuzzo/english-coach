@@ -79,6 +79,8 @@ EC.sync = (function () {
       .sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
     out.sessions = unionBy(L.sessions, R.sessions, function (x) { return String(x.start); })
       .sort(function (a, b) { return a.start - b.start; });
+    out.writings = unionBy(L.writings, R.writings, function (x) { return String(x.start); })
+      .sort(function (a, b) { return a.start - b.start; });
 
     // argomenti: vince il dato usato più di recente
     out.topics = {};
@@ -106,7 +108,15 @@ EC.sync = (function () {
     });
     out.activeSession = cands[0] || null;
 
-    out.streak = streakFrom(out.sessions);
+    // traduzione libera in corso: quella iniziata più di recente, se non è già stata conclusa
+    var wdone = {};
+    out.writings.forEach(function (w) { wdone[w.start] = true; });
+    var wc = [L.activeWriting, R.activeWriting].filter(function (x) { return x && !wdone[x.start]; });
+    wc.sort(function (a, b) { return (b.start || 0) - (a.start || 0) || (b.results ? 1 : 0) - (a.results ? 1 : 0); });
+    out.activeWriting = wc[0] || null;
+
+    // la serie di giorni conta sia le sessioni sia le traduzioni libere
+    out.streak = streakFrom(out.sessions.concat(out.writings));
     out.settings = L.settings; // sempre locali
     return out;
   }

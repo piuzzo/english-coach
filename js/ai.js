@@ -3,6 +3,8 @@
  *  1. generateItems: all'inizio della sessione crea esercizi nuovi sugli argomenti deboli
  *  2. judge: se una risposta scritta non corrisponde a nessuna variante prevista, chiede se è
  *     comunque accettabile e, se è sbagliata, una spiegazione su misura
+ *  3. generateText / correctTranslation: traduzione libera (testo italiano su misura e correzione
+ *     frase per frase con ogni errore spiegato; vedi js/writing.js)
  * Se manca la chiave, la rete o la chiamata fallisce, l'app usa solo la banca offline.
  * Niente SDK: la pagina si apre come file locale (file://) senza strumenti di build,
  * quindi la richiesta HTTP è scritta a mano.
@@ -249,6 +251,126 @@ EC.ai = (function () {
     });
   }
 
+  /* ---------- 3. traduzione libera: testo italiano su misura ---------- */
+  var TIP_SCHEMA = {
+    type: 'object',
+    properties: { wrong: { type: 'string' }, right: { type: 'string' }, why: { type: 'string' }, topic: { type: 'string' } },
+    required: ['wrong', 'right', 'why', 'topic'],
+    additionalProperties: false
+  };
+  var TEXT_SCHEMA = {
+    type: 'object',
+    properties: {
+      title: { type: 'string' },
+      sentences: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            it: { type: 'string' },
+            en: { type: 'array', items: { type: 'string' } },
+            topics: { type: 'array', items: { type: 'string' } },
+            explanation: { type: 'string' },
+            tips: { type: 'array', items: TIP_SCHEMA }
+          },
+          required: ['it', 'en', 'topics', 'explanation', 'tips'],
+          additionalProperties: false
+        }
+      }
+    },
+    required: ['title', 'sentences'],
+    additionalProperties: false
+  };
+
+  var THEMES = ['una giornata a scuola', 'lo sport', 'una gita', 'le vacanze', 'i videogiochi', 'la musica', 'un compleanno', 'gli amici',
+    'la famiglia', 'il cibo', 'un film o una serie', 'gli animali', 'la tecnologia', 'il fine settimana', 'un viaggio', 'la città', 'il meteo', 'un piccolo imprevisto'];
+
+  function generateText(state, opts) {
+    opts = opts || {};
+    if (!enabled(state)) return Promise.resolve(null);
+    var level = EC.learner.currentLevel(state);
+    var n = opts.sentences || EC.writing.CFG.SENTENCES[level] || 4;
+    var focus = (opts.topics || []).map(function (id) { return EC.data.topicById[id]; }).filter(Boolean);
+    var allowed = EC.learner.usableTopics().filter(function (t) { return t.area !== 'reading' && U.levelIndex(t.level) <= U.levelIndex(level); });
+    var theme = opts.theme || U.pick(THEMES);
+    var user = [
+      'Scrivi un breve testo in ITALIANO di ' + n + ' frasi sul tema "' + theme + '", da far tradurre in inglese a un ragazzo italiano di 14-15 anni (livello ' + level + ').',
+      'Il testo deve essere coerente (una piccola storia, un messaggio o una descrizione), con frasi naturali e adatte all\'età, ognuna traducibile con le strutture del livello ' + level + ' o inferiori.',
+      'Fai in modo che le frasi richiedano di usare questi argomenti (almeno una frase per ciascuno):',
+      focus.map(function (t) { return topicBrief(t, 3); }).join('\n') || '- argomenti a scelta del livello',
+      '',
+      'Per ogni frase:',
+      '- "it": la frase italiana;',
+      '- "en": tutte le traduzioni inglesi corrette e naturali (inglese britannico), da 2 a 6, la più naturale per prima;',
+      '- "topics": gli id degli argomenti che la frase allena, scelti SOLO da questo elenco: ' + allowed.map(function (t) { return t.id; }).join(', ') + ';',
+      '- "explanation": in italiano semplice, il punto chiave della traduzione e perché (confronto con l\'italiano);',
+      '- "tips": 2-4 errori tipici di un italiano su QUELLA frase: "wrong" = il frammento sbagliato breve (2-5 parole, minuscolo, senza punteggiatura) che lo studente potrebbe scrivere, "right" = la forma giusta, "why" = spiegazione in italiano, "topic" = id dell\'argomento. Il frammento "wrong" non deve mai comparire in una traduzione corretta.',
+      opts.avoid && opts.avoid.length ? 'Non ripetere questi testi già fatti: ' + opts.avoid.join('; ') + '.' : '',
+      '"title": un titolo italiano breve.'
+    ].filter(Boolean).join('\n');
+    return call(state, {
+      system: GEN_SYSTEM.split('\n')[0] + '\nScrivi testi italiani naturali e corretti. Le spiegazioni sono in italiano semplice e incoraggiante.',
+      user: user, schema: TEXT_SCHEMA, effort: 'medium', timeoutMs: 120000
+    }).then(function (raw) {
+      return EC.writing.sanitizeText(raw, { topics: allowed.map(function (t) { return t.id; }), level: level });
+    });
+  }
+
+  /* ---------- 4. traduzione libera: correzione frase per frase ---------- */
+  var CORRECTION_SCHEMA = {
+    type: 'object',
+    properties: {
+      sentences: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            n: { type: 'integer' },
+            acceptable: { type: 'boolean' },
+            corrected: { type: 'string' },
+            better: { type: 'string' },
+            errors: { type: 'array', items: TIP_SCHEMA },
+            comment: { type: 'string' }
+          },
+          required: ['n', 'acceptable', 'corrected', 'better', 'errors', 'comment'],
+          additionalProperties: false
+        }
+      }
+    },
+    required: ['sentences'],
+    additionalProperties: false
+  };
+
+  var CORRECT_SYSTEM = [
+    'Sei un insegnante di inglese preciso e gentile. Correggi le traduzioni dall\'italiano all\'inglese di un ragazzo italiano di 14-15 anni.',
+    'Valuti il significato e la correttezza dell\'inglese, non la somiglianza con la traduzione proposta: qualunque traduzione corretta, naturale e fedele va accettata.',
+    'Ignora maiuscole e punteggiatura. Le contrazioni (don\'t, I\'m) e l\'ortografia americana sono corrette. Gli errori di ortografia, di grammatica, di lessico e le parti mancanti o tradotte male sono errori.',
+    'Le spiegazioni sono in italiano semplice, brevi (1-2 frasi), incoraggianti, e spiegano PERCHÉ citando la regola e, se utile, il confronto con l\'italiano.'
+  ].join('\n');
+
+  function correctTranslation(state, text, answers) {
+    if (!enabled(state)) return Promise.resolve(null);
+    var ids = EC.learner.usableTopics().filter(function (t) { return t.area !== 'reading'; });
+    var lines = text.sentences.map(function (s, i) {
+      return 'Frase ' + (i + 1) + '\n  Italiano: ' + s.it + '\n  Traduzioni di riferimento: ' + s.en.join(' | ') +
+        '\n  Argomenti: ' + (s.topics || []).join(', ') + '\n  Traduzione dello studente: ' + (String(answers[i] || '').trim() || '(vuota)');
+    }).join('\n\n');
+    var user = [
+      'Testo "' + text.title + '" (livello ' + text.level + '). Correggi ogni frase.',
+      '',
+      lines,
+      '',
+      'Per ogni frase ("n" = numero della frase):',
+      '- "acceptable": true se la traduzione è corretta e fedele (anche se diversa dai riferimenti), false se contiene anche un solo errore;',
+      '- "corrected": la traduzione DELLO STUDENTE con le correzioni minime necessarie (mantieni le sue scelte corrette); se è accettabile, ripetila uguale;',
+      '- "errors": un elemento per ogni errore: "wrong" = il frammento esatto scritto dallo studente, "right" = come va scritto, "why" = spiegazione in italiano, "topic" = l\'id dell\'argomento a cui appartiene la regola, scelto da questo elenco: ' + ids.map(function (t) { return t.id; }).join(', ') + ' (usa "other" se nessuno è adatto, per esempio per l\'ortografia); vuoto se accettabile;',
+      '- "better": se esiste una versione più naturale diversa da "corrected", scrivila; altrimenti stringa vuota;',
+      '- "comment": una frase breve in italiano (un complimento se è giusta, un incoraggiamento se è sbagliata).'
+    ].join('\n');
+    return call(state, { system: CORRECT_SYSTEM, user: user, schema: CORRECTION_SCHEMA, effort: 'medium', timeoutMs: 120000 })
+      .then(function (raw) { return EC.writing.fromAi(raw, text, answers); });
+  }
+
   /* ---------- prova della chiave (Area genitore) ---------- */
   function test(state) {
     return call(state, {
@@ -265,6 +387,8 @@ EC.ai = (function () {
     enabled: enabled,
     generateItems: generateItems,
     judge: judge,
+    generateText: generateText,
+    correctTranslation: correctTranslation,
     test: test,
     sanitize: sanitize,
     get lastError() { return lastError; }

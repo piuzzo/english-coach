@@ -90,7 +90,8 @@ EC.report = (function () {
     }
     var sessions = state.sessions || [];
     var mins = sessions.reduce(function (a, s) { return a + (s.minutes || 0); }, 0);
-    f['In totale'] = sessions.length + ' sessioni · ' + mins + ' minuti · ' + ((state.streak && state.streak.count) || 0) + ' giorni di fila';
+    var wr = state.writings || [];
+    f['In totale'] = sessions.length + ' sessioni' + (wr.length ? ' + ' + wr.length + ' traduzioni libere' : '') + ' · ' + mins + ' minuti · ' + ((state.streak && state.streak.count) || 0) + ' giorni di fila';
     return f;
   }
 
@@ -101,6 +102,45 @@ EC.report = (function () {
     var id = 's' + summary.start;
     if (q.some(function (x) { return x.id === id; })) return false;
     q.push({ id: id, fields: build(state, summary, extra), createdAt: U.now(), tries: 0, hardFails: 0 });
+    while (q.length > MAX_QUEUE) q.shift();
+    return true;
+  }
+
+  /* Resoconto di una traduzione libera. Funzione pura. */
+  function buildWriting(state, w, extra) {
+    extra = extra || {};
+    var name = (state.profile && state.profile.name) || 'Lo studente';
+    var f = {};
+    f._subject = 'English Coach – ' + name + ': traduzione libera (' + w.correct + '/' + w.total + ' frasi corrette)';
+    f._template = 'table';
+    f._captcha = 'false';
+    f['Studente'] = name;
+    f['Quando'] = fmtTime(w.end || U.now()) + (extra.device ? ' (' + extra.device + ')' : '');
+    f['Attività'] = 'Traduzione libera dall\'italiano: «' + w.title + '» (livello ' + w.level + ', ' + (w.source === 'ai' ? 'testo e correzione AI' : 'testo della banca offline') + ')';
+    f['Risultato'] = w.correct + ' frasi corrette su ' + w.total + ' · ' + w.minutes + ' min';
+    var up = [], down = [];
+    (w.boxChanges || []).forEach(function (c) {
+      if (c.to > c.from) up.push(title(c.topic));
+      else if (c.to < c.from || (w.perTopic[c.topic] && w.perTopic[c.topic].wrong)) down.push(title(c.topic));
+    });
+    f['Argomenti migliorati'] = up.length ? U.uniq(up).join(', ') : '—';
+    f['Da ripassare'] = down.length ? U.uniq(down).join(', ') : '—';
+    (w.errors || []).slice(0, 8).forEach(function (e, i) {
+      var det = (e.details || []).map(function (d) { return '«' + d.wrong + '» → «' + d.right + '»' + (d.topic ? ' [' + title(d.topic) + ']' : ''); }).join('; ');
+      f['Frase ' + (i + 1)] = e.it + ' — ha scritto: «' + (e.given || '(nessuna)') + '» → corretta: «' + e.corrected + '»' + (det ? ' — ' + det : '');
+    });
+    if (w.drill && w.drill.length) {
+      f['Rinforzo'] = w.drill.map(function (d) { return title(d.topic) + (d.correct ? ' ✓' : ' ✗'); }).join(', ');
+    }
+    return f;
+  }
+
+  function enqueueWriting(state, w, extra) {
+    if (!enabled(state)) return false;
+    var q = queue(state);
+    var id = 'w' + w.start;
+    if (q.some(function (x) { return x.id === id; })) return false;
+    q.push({ id: id, fields: buildWriting(state, w, extra), createdAt: U.now(), tries: 0, hardFails: 0 });
     while (q.length > MAX_QUEUE) q.shift();
     return true;
   }
@@ -174,7 +214,7 @@ EC.report = (function () {
       _subject: 'English Coach – email di prova',
       _template: 'table',
       _captcha: 'false',
-      'Messaggio': 'Funziona! Da ora riceverai un resoconto ogni volta che ' + name + ' completa una sessione.',
+      'Messaggio': 'Funziona! Da ora riceverai un resoconto ogni volta che ' + name + ' completa una sessione o una traduzione libera.',
       'Inviata': fmtTime(U.now())
     }).then(function (r) {
       var inf = info(state);
@@ -192,6 +232,8 @@ EC.report = (function () {
     setConfig: setConfig,
     build: build,
     enqueue: enqueue,
+    buildWriting: buildWriting,
+    enqueueWriting: enqueueWriting,
     flush: flush,
     sendTest: sendTest,
     info: info,
